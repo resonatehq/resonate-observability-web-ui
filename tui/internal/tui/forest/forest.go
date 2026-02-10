@@ -118,7 +118,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
-		// Wrap promises in RootItem
+		// Replace roots (don't append) to prevent duplicates on refresh
+		m.roots = nil
 		for _, p := range msg.Promises {
 			m.roots = append(m.roots, &RootItem{Promise: p, Expanded: false})
 		}
@@ -549,15 +550,15 @@ func (m Model) fetchRootsCmd() tea.Cmd {
 		// Filter to roots only (client-side for now)
 		var roots []client.Promise
 		for _, p := range result.Promises {
-			role := promiseRole(p)
-			// Only include roots, or filter by type if specified
-			if typeFilter != "" {
-				if role == typeFilter {
+			// Default: only show root promises (no parent)
+			if typeFilter == "" {
+				if isRoot(p) {
 					roots = append(roots, p)
 				}
 			} else {
-				// Default: only show roots
-				if role == "root" {
+				// Type filter: show all promises matching the type
+				role := promiseRole(p)
+				if role == typeFilter {
 					roots = append(roots, p)
 				}
 			}
@@ -607,13 +608,22 @@ func (m Model) fetchTreeForRoot(rootID string) tea.Cmd {
 	}
 }
 
-// Refresh reloads the current page.
+// Refresh reloads the current page silently (no loading spinner).
 func (m *Model) Refresh() tea.Cmd {
+	// Clear roots to prevent duplicates, but don't set loading (keeps display stable)
 	m.roots = nil
 	m.selected = 0
+	// Don't set m.loading = true - this prevents the "No roots found" flash
 	return m.fetchRootsCmd()
 }
 
+// isRoot checks if a promise is a root (has no parent or parent == self).
+func isRoot(p client.Promise) bool {
+	parent := p.Tags["resonate:parent"]
+	return parent == "" || parent == p.ID
+}
+
+// promiseRole determines the type of a promise (for child promises).
 func promiseRole(p client.Promise) string {
 	if p.Tags["resonate:timeout"] != "" {
 		return "sleep"
@@ -624,12 +634,7 @@ func promiseRole(p client.Promise) string {
 	case "local":
 		return "run"
 	}
-	// No scope tag — check if it has a parent
-	parent := p.Tags["resonate:parent"]
-	if parent == "" || parent == p.ID {
-		return "root"
-	}
-	return ""
+	return "root"
 }
 
 func nodeDetails(node *tree.TreeNode) string {

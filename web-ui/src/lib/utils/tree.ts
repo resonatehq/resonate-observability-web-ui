@@ -75,7 +75,15 @@ export async function fetchTreePromises(
 }
 
 /**
- * Determines the role/type of a promise.
+ * Checks if a promise is a root (has no parent or parent === self).
+ */
+export function isRoot(p: Promise): boolean {
+	const parent = p.tags?.['resonate:parent'];
+	return !parent || parent === p.id;
+}
+
+/**
+ * Determines the role/type of a promise (for child promises).
  */
 export function promiseRole(p: Promise): string {
 	if (p.tags?.['resonate:timeout']) {
@@ -87,17 +95,5 @@ export function promiseRole(p: Promise): string {
 		case 'local':
 			return 'run';
 	}
-	const parent = p.tags?.['resonate:parent'];
-	if (!parent || parent === p.id) {
-		return 'root';
-	}
-	return '';
-}
-
-/**
- * Checks if a promise is a root (has no parent or parent === self).
- */
-export function isRoot(p: Promise): boolean {
-	const parent = p.tags?.['resonate:parent'];
-	return !parent || parent === p.id;
+	return 'root';
 }
