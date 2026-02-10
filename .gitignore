@@ -1,0 +1,10 @@
+# Go binaries
+tui/resonate-observability-tui
+tui/tui
+
+# Node
+web-ui/node_modules/
+web-ui/.svelte-kit/
+
+# OS
+.DS_Store
