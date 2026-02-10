@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/resonatehq/resonate-observability/tui/internal/client"
+	"github.com/resonatehq/resonate-observability/tui/internal/tui/forest"
 	"github.com/resonatehq/resonate-observability/tui/internal/tui/promises"
 	"github.com/resonatehq/resonate-observability/tui/internal/tui/theme"
 	"github.com/resonatehq/resonate-observability/tui/internal/tui/tree"
@@ -15,7 +16,8 @@ import (
 type View int
 
 const (
-	ViewPromiseList View = iota
+	ViewForest View = iota // Default: forest of call graphs
+	ViewPromiseList
 	ViewPromiseDetail
 	ViewTree
 )
@@ -39,6 +41,7 @@ type Model struct {
 	height       int
 	serverURL    string
 
+	forestView    forest.Model
 	promiseList   promises.Model
 	promiseDetail promises.DetailModel
 	treeView      tree.Model
@@ -50,15 +53,18 @@ func NewModel(c *client.Client, opts Options) Model {
 	m := Model{
 		client:        c,
 		options:       opts,
-		activeView:    ViewPromiseList,
-		previousView:  ViewPromiseList,
+		activeView:    ViewForest, // Default to forest view
+		previousView:  ViewForest,
 		serverURL:     c.BaseURL,
+		forestView:    forest.New(c),
 		promiseList:   promises.New(c),
 		promiseDetail: promises.NewDetail(),
 		treeView:      tree.New(c),
 	}
 
-	if opts.InitialView == "tree" && opts.TreeRootID != "" {
+	if opts.InitialView == "list" {
+		m.activeView = ViewPromiseList
+	} else if opts.InitialView == "tree" && opts.TreeRootID != "" {
 		m.activeView = ViewTree
 	}
 
@@ -67,9 +73,12 @@ func NewModel(c *client.Client, opts Options) Model {
 
 func (m Model) Init() tea.Cmd {
 	var cmds []tea.Cmd
-	cmds = append(cmds, m.promiseList.Init())
 
-	if m.activeView == ViewTree && m.options.TreeRootID != "" {
+	if m.activeView == ViewForest {
+		cmds = append(cmds, m.forestView.Init())
+	} else if m.activeView == ViewPromiseList {
+		cmds = append(cmds, m.promiseList.Init())
+	} else if m.activeView == ViewTree && m.options.TreeRootID != "" {
 		cmds = append(cmds, m.treeView.Load(m.options.TreeRootID))
 	}
 
@@ -101,12 +110,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if theme.Key(msg, "tab") {
 			switch m.activeView {
+			case ViewForest:
+				m.activeView = ViewPromiseList
 			case ViewPromiseList:
 				if m.treeView.RootID != "" {
 					m.activeView = ViewTree
+				} else {
+					m.activeView = ViewForest
 				}
 			case ViewTree:
-				m.activeView = ViewPromiseList
+				m.activeView = ViewForest
 			}
 			return m, nil
 		}
@@ -117,7 +130,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeView = m.previousView
 				return m, nil
 			case ViewTree:
-				m.activeView = ViewPromiseList
+				m.activeView = ViewForest
+				return m, nil
+			case ViewPromiseList:
+				m.activeView = ViewForest
 				return m, nil
 			}
 		}
@@ -154,14 +170,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		cmds = append(cmds, tickCmd(m.options.RefreshInterval))
-		if m.activeView == ViewPromiseList {
+		if m.activeView == ViewForest {
+			cmds = append(cmds, m.forestView.Refresh())
+		} else if m.activeView == ViewPromiseList {
 			cmds = append(cmds, m.promiseList.Refresh())
 		}
 		return m, tea.Batch(cmds...)
+
+	case forest.OpenDetailMsg:
+		m.previousView = m.activeView
+		m.activeView = ViewPromiseDetail
+		m.promiseDetail.SetPromise(&msg.Promise, m.width, m.height)
+		return m, nil
 	}
 
 	// Delegate to active view
 	switch m.activeView {
+	case ViewForest:
+		var cmd tea.Cmd
+		m.forestView, cmd = m.forestView.Update(msg)
+		cmds = append(cmds, cmd)
+
 	case ViewPromiseList:
 		var cmd tea.Cmd
 		m.promiseList, cmd = m.promiseList.Update(msg)
@@ -189,7 +218,8 @@ func (m Model) View() string {
 		label string
 		view  View
 	}{
-		{"Promises", ViewPromiseList},
+		{"Graphs", ViewForest},
+		{"List", ViewPromiseList},
 		{"Tree", ViewTree},
 	}
 
@@ -206,6 +236,8 @@ func (m Model) View() string {
 
 	// Active view content
 	switch m.activeView {
+	case ViewForest:
+		b.WriteString(m.forestView.View())
 	case ViewPromiseList:
 		b.WriteString(m.promiseList.View())
 	case ViewPromiseDetail:
@@ -236,6 +268,18 @@ func renderHelp() string {
 		"  q/ctrl+c    Quit",
 		"  tab         Switch views",
 		"  ?           Toggle help",
+		"",
+		fmt.Sprintf("  %s  %s", theme.HeaderStyle.Render("Call Graphs"), ""),
+		"  1-4         Filter by state",
+		"  5           Cycle type filter",
+		"  s           Cycle sort mode",
+		"  j/k         Navigate",
+		"  enter/space Expand/collapse",
+		"  a           Expand all",
+		"  c           Collapse all",
+		"  i           Inspect root",
+		"  n/p         Next/prev page",
+		"  r           Refresh",
 		"",
 		fmt.Sprintf("  %s  %s", theme.HeaderStyle.Render("Promise List"), ""),
 		"  /           Search",

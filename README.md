@@ -13,17 +13,23 @@ Both UIs connect to any Resonate server via its HTTP API.
 
 ## Features
 
-### Promise Browser
+### Call Graph Forest View (Default)
+- **Visualize all active workflows** — See all root promises with their call graphs at a glance
+- **Expandable trees** — Click to expand any root and see its full promise tree
+- **Smart filtering** — Filter by state (pending/resolved/rejected) and type (root/rpc/run/sleep)
+- **Flexible sorting** — Sort by created time or resolved time (ascending/descending)
+- **Pagination** — Load more roots on demand
+- **Auto-refresh** — Keeps view up-to-date every 5 seconds (TUI) or 5 seconds (Web UI)
+
+### Promise List View (TUI Only)
 - Search promises by ID pattern (wildcards supported)
-- Filter by state (pending, resolved, rejected)
-- Filter by role (root workflows, rpc calls, local runs, sleeps)
+- Filter by state and type
 - View detailed promise information
 - Inspect parameters, values, and tags
-- Auto-refresh with configurable intervals
 
-### Interactive Tree View
-- Visualize promise call graphs
-- Navigate parent-child relationships
+### Single-Tree View
+- Deep-dive into a specific promise call graph
+- Fully recursive tree building using `resonate:parent` tags
 - Expand/collapse nodes
 - Inspect individual promises in context
 
@@ -47,7 +53,7 @@ go build .
 
 ```
 --server string      Resonate server URL (default "http://localhost:8001")
---view string        Initial view: list, tree (default "list")
+--view string        Initial view: graphs (default), list, tree
 --root string        Root promise ID for tree view
 --refresh duration   Auto-refresh interval (default 5s)
 --token string       Bearer auth token
@@ -56,6 +62,20 @@ go build .
 ```
 
 ### Keyboard Shortcuts
+
+**Call Graphs (Forest View):**
+- `1-4` — Filter by state (all, pending, resolved, rejected)
+- `5` — Cycle type filter (all roots, root, rpc, run, sleep)
+- `s` — Cycle sort mode (created ↓/↑, resolved ↓/↑)
+- `j/k` — Navigate up/down
+- `enter/space` — Expand/collapse selected root
+- `a` — Expand all roots
+- `c` — Collapse all to roots only
+- `i` — Inspect selected root
+- `n/p` — Next/previous page
+- `r` — Manual refresh
+- `tab` — Switch views
+- `q` — Quit
 
 **Promise List:**
 - `/` — Search
@@ -67,6 +87,7 @@ go build .
 - `n/p` — Next/previous page
 - `r` — Manual refresh
 - `tab` — Switch views
+- `esc` — Back to graphs
 - `q` — Quit
 
 **Tree View:**
@@ -76,7 +97,7 @@ go build .
 - `i` — Inspect selected promise
 - `r` — Refresh tree
 - `tab` — Switch views
-- `esc` — Back
+- `esc` — Back to graphs
 - `q` — Quit
 
 **Detail View:**

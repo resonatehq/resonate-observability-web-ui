@@ -41,6 +41,9 @@ func (c *Client) SearchPromises(ctx context.Context, params SearchParams) (*Sear
 	if params.Cursor != "" {
 		q.Set("cursor", params.Cursor)
 	}
+	if params.SortID != nil {
+		q.Set("sortId", strconv.Itoa(*params.SortID))
+	}
 	for k, v := range params.Tags {
 		q.Set(fmt.Sprintf("tags[%s]", k), v)
 	}

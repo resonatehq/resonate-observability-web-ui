@@ -49,16 +49,38 @@ async function get<T>(path: string): globalThis.Promise<T> {
 	return resp.json();
 }
 
+export interface SearchPromisesParams {
+	id?: string;
+	state?: string;
+	tags?: Record<string, string>;
+	limit?: number;
+	cursor?: string;
+	sortId?: number; // -1 for desc, 1 for asc
+}
+
 export async function searchPromises(
 	id: string = '*',
 	state: string = '',
 	limit: number = 50
 ): globalThis.Promise<Promise[]> {
-	const params = new URLSearchParams({ id: id || '*' });
-	if (state) params.set('state', state);
-	if (limit) params.set('limit', String(limit));
-	const resp = await get<SearchPromisesResponse>(`/promises?${params}`);
-	return resp.promises ?? [];
+	const result = await searchPromisesWithCursor({ id, state, limit });
+	return result.promises;
+}
+
+export async function searchPromisesWithCursor(
+	params: SearchPromisesParams
+): globalThis.Promise<SearchPromisesResponse> {
+	const urlParams = new URLSearchParams({ id: params.id || '*' });
+	if (params.state) urlParams.set('state', params.state);
+	if (params.limit) urlParams.set('limit', String(params.limit));
+	if (params.cursor) urlParams.set('cursor', params.cursor);
+	if (params.sortId !== undefined) urlParams.set('sortId', String(params.sortId));
+	if (params.tags) {
+		for (const [k, v] of Object.entries(params.tags)) {
+			urlParams.set(`tags[${k}]`, v);
+		}
+	}
+	return get<SearchPromisesResponse>(`/promises?${urlParams}`);
 }
 
 export async function getPromise(id: string): globalThis.Promise<Promise> {
