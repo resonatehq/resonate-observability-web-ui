@@ -31,4 +31,10 @@ type SearchParams struct {
 	Tags   map[string]string
 	Limit  int
 	Cursor string
+	SortID *int // -1 for descending (newest first), 1 for ascending (oldest first)
+}
+
+// IntPtr returns a pointer to an int.
+func IntPtr(i int) *int {
+	return &i
 }
