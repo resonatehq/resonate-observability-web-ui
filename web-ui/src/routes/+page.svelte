@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { searchPromisesWithCursor, type Promise } from '$lib/api/client';
-	import { buildTree, fetchTreePromises, isRoot, promiseRole, type TreeNode } from '$lib/utils/tree';
+	import { buildTree, fetchTreePromises, isRootInSet, promiseRole, type TreeNode } from '$lib/utils/tree';
 	import Tree from '$lib/components/Tree.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 
@@ -39,7 +39,7 @@
 			let filteredRoots = result.promises.filter((p) => {
 				const role = promiseRole(p);
 				if (typeFilter && role !== typeFilter) return false;
-				if (!typeFilter && !isRoot(p)) return false;
+				if (!typeFilter && !isRootInSet(p, result.promises)) return false;
 				return true;
 			});
 
@@ -74,8 +74,8 @@
 			if (!root.tree && !root.loading) {
 				root.loading = true;
 				try {
-					const promises = await fetchTreePromises(root.promise.id, async (tags, c) =>
-						searchPromisesWithCursor({ id: '*', tags, cursor: c, limit: 100 })
+					const promises = await fetchTreePromises(root.promise.id, async (params) =>
+						searchPromisesWithCursor({ ...params, id: params.id || '*' })
 					);
 					root.tree = buildTree(root.promise.id, promises);
 					root.tree.expanded = true; // Expand root node by default

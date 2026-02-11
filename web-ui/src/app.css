@@ -26,6 +26,11 @@
 
 	--sidebar-width: 240px;
 	--font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+	/* Graph visualization */
+	--node-bg: #1a1d24;
+	--node-border: #2a2d3a;
+	--edge-default: #3a3d4a;
 }
 
 * {

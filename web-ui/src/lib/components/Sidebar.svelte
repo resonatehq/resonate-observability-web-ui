@@ -4,6 +4,7 @@
 
 	const navItems = [
 		{ href: '/', label: 'Dashboard' },
+		{ href: '/workflows', label: 'Workflows' },
 		{ href: '/promises', label: 'Promises' },
 		{ href: '/schedules', label: 'Schedules' },
 		{ href: '/settings', label: 'Settings' }

@@ -118,10 +118,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
+		// Preserve expanded state and tree data from old roots
+		oldRoots := make(map[string]*RootItem)
+		for _, root := range m.roots {
+			oldRoots[root.Promise.ID] = root
+		}
 		// Replace roots (don't append) to prevent duplicates on refresh
 		m.roots = nil
 		for _, p := range msg.Promises {
-			m.roots = append(m.roots, &RootItem{Promise: p, Expanded: false})
+			newRoot := &RootItem{Promise: p, Expanded: false}
+			// Restore state from old root if it exists
+			if oldRoot, exists := oldRoots[p.ID]; exists {
+				newRoot.Expanded = oldRoot.Expanded
+				newRoot.Tree = oldRoot.Tree
+				newRoot.Loading = oldRoot.Loading
+			}
+			m.roots = append(m.roots, newRoot)
 		}
 		m.cursor = msg.Cursor
 		return m, nil
@@ -333,7 +345,7 @@ func (m *Model) adjustScroll() {
 }
 
 func (m Model) viewHeight() int {
-	h := m.height - 10 // header, filters, footer
+	h := m.height - 12 // header, filters, column headers, footer
 	if h < 5 {
 		h = 5
 	}
@@ -399,6 +411,11 @@ func (m Model) View() string {
 		return b.String()
 	}
 
+	// Column headers
+	header := fmt.Sprintf("  %-62s %s", "Promise ID", "State")
+	b.WriteString(theme.DimText.Render(header) + "\n")
+	b.WriteString(theme.DimText.Render(strings.Repeat("─", m.width)) + "\n")
+
 	// Render roots (and expanded trees)
 	availableHeight := m.viewHeight()
 	rendered := m.renderForest()
@@ -452,7 +469,8 @@ func (m Model) renderForest() string {
 		state := theme.StyleState(root.Promise.State)
 		id := root.Promise.ID
 
-		line := fmt.Sprintf("%s%s %s %-50s %s", expandIcon, dot, id, "", state)
+		// Format with proper column widths
+		line := fmt.Sprintf("%s%s %-60s %s", expandIcon, dot, id, state)
 		if isSelected {
 			line = theme.SelectedRow.Render(line)
 		}
@@ -552,7 +570,7 @@ func (m Model) fetchRootsCmd() tea.Cmd {
 		for _, p := range result.Promises {
 			// Default: only show root promises (no parent)
 			if typeFilter == "" {
-				if isRoot(p) {
+				if isRootInSet(p, result.Promises) {
 					roots = append(roots, p)
 				}
 			} else {
@@ -602,18 +620,34 @@ func (m Model) fetchTreeForRoot(rootID string) tea.Cmd {
 			cursor = *result.Cursor
 		}
 
-		// Build tree
+		// If no results with resonate:origin tag, try ID-based search
+		if len(allPromises) == 0 {
+			// Fetch promises with IDs starting with rootID (e.g., rootID.1, rootID.2, etc.)
+			params := client.SearchParams{
+				ID:    rootID + "*",
+				Limit: 100,
+			}
+			result, err := c.SearchPromises(context.Background(), params)
+			if err == nil {
+				allPromises = result.Promises
+			}
+		}
+
+		// Build tree (handles both tag-based and ID-based parent relationships)
 		treeRoot := tree.BuildTree(rootID, allPromises)
 		return TreeLoadedForRootMsg{RootID: rootID, Tree: treeRoot}
 	}
 }
 
-// Refresh reloads the current page silently (no loading spinner).
+// Refresh reloads from page 1 with current filters.
 func (m *Model) Refresh() tea.Cmd {
-	// Clear roots to prevent duplicates, but don't set loading (keeps display stable)
-	m.roots = nil
-	m.selected = 0
-	// Don't set m.loading = true - this prevents the "No roots found" flash
+	// Reset to page 1
+	m.cursor = nil
+	m.prevCursors = nil
+	// Don't reset m.selected - preserve cursor position during auto-refresh
+	// Set loading to true to prevent "No roots found" flash
+	// Keep old roots visible until new data arrives (don't clear m.roots here)
+	m.loading = true
 	return m.fetchRootsCmd()
 }
 
@@ -621,6 +655,26 @@ func (m *Model) Refresh() tea.Cmd {
 func isRoot(p client.Promise) bool {
 	parent := p.Tags["resonate:parent"]
 	return parent == "" || parent == p.ID
+}
+
+// isRootInSet checks if a promise is a root within a given set of promises.
+// Uses both tag-based and ID-based parent detection.
+func isRootInSet(p client.Promise, allPromises []client.Promise) bool {
+	// First check tags
+	parent := p.Tags["resonate:parent"]
+	if parent != "" && parent != p.ID {
+		return false // Has a parent tag
+	}
+
+	// Fallback: check if any other promise has an ID that is a prefix of this one
+	// e.g., "countdown-123.2" is a child of "countdown-123"
+	for _, other := range allPromises {
+		if other.ID != p.ID && strings.HasPrefix(p.ID, other.ID+".") {
+			return false // This promise's ID suggests it's a child
+		}
+	}
+
+	return true
 }
 
 // promiseRole determines the type of a promise (for child promises).
