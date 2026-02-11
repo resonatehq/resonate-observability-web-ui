@@ -1,7 +1,7 @@
 /* Import Inter font (Resonate brand typeface) */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* Resonate Brand Colors */
+/* Resonate Brand Colors - Dark Mode (default) */
 :root {
 	--dark: #080A0E;             /* Primary background */
 	--secondary: #1EE3CF;        /* Brand accent (teal) */
@@ -31,6 +31,30 @@
 	--node-bg: #1a1d24;
 	--node-border: #2a2d3a;
 	--edge-default: #3a3d4a;
+}
+
+/* Light Mode */
+[data-theme='light'] {
+	--bg: #FFFFFF;
+	--bg-surface: #F8FAFC;
+	--bg-surface-hover: #F1F5F9;
+	--border: #E2E8F0;
+	--text: #0F172A;
+	--text-muted: #64748B;
+
+	/* Status colors adjusted for light background */
+	--green: #16a34a;
+	--green-bg: rgba(22, 163, 74, 0.1);
+	--yellow: #ca8a04;
+	--yellow-bg: rgba(202, 138, 4, 0.1);
+	--red: #dc2626;
+	--red-bg: rgba(220, 38, 38, 0.1);
+	--gray: #6b7280;
+
+	/* Graph visualization for light mode */
+	--node-bg: #FFFFFF;
+	--node-border: #E2E8F0;
+	--edge-default: #CBD5E1;
 }
 
 * {

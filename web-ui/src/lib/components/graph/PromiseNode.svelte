@@ -4,7 +4,11 @@
 	import type { GraphNodeData } from '$lib/utils/tree';
 	import { formatDuration } from '$lib/utils/tree';
 
-	let { data, id }: NodeProps<GraphNodeData> = $props();
+	interface Props extends NodeProps {
+		data: GraphNodeData;
+	}
+
+	let { data, id }: Props = $props();
 
 	function stateColor(state: string): string {
 		switch (state) {
@@ -58,6 +62,18 @@
 			<span class="node-role role-{data.role}">{data.role}</span>
 		{/if}
 	</div>
+
+	{#if data.functionName && data.role !== 'sleep'}
+		<div class="node-function">
+			<span class="function-name" title={data.functionName}>{data.functionName}</span>
+		</div>
+	{/if}
+
+	{#if data.role === 'sleep' && data.sleepDuration != null}
+		<div class="node-function">
+			<span class="sleep-duration">sleeping {formatDuration(data.sleepDuration)}</span>
+		</div>
+	{/if}
 
 	<div class="node-body">
 		<span class="node-state" style="color: {borderColor}">{stateLabel(data.promise.state)}</span>
@@ -146,6 +162,30 @@
 	.role-sleep {
 		background: rgba(148, 163, 184, 0.12);
 		color: var(--muted, #94a3b8);
+	}
+
+	.node-function {
+		margin-bottom: 0.375rem;
+		padding: 0.25rem 0.375rem;
+		background: var(--bg-surface-hover, rgba(255, 255, 255, 0.03));
+		border-radius: 4px;
+		font-size: 0.6875rem;
+	}
+
+	.function-name {
+		color: var(--secondary, #1ee3cf);
+		font-weight: 500;
+		font-family: 'SF Mono', 'Fira Code', monospace;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		display: block;
+	}
+
+	.sleep-duration {
+		color: var(--muted, #94a3b8);
+		font-style: italic;
+		font-size: 0.6875rem;
 	}
 
 	.node-body {

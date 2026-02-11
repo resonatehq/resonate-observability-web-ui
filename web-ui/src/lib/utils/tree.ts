@@ -17,6 +17,10 @@ export interface GraphNodeData {
 	role: string;
 	childCount: number;
 	label: string;
+	/** Function name for rpc/run calls (from resonate:invoke) */
+	functionName?: string;
+	/** Sleep duration in ms for sleep promises */
+	sleepDuration?: number;
 	[key: string]: unknown;
 }
 
@@ -273,6 +277,25 @@ export function treeToGraphData(
 
 	function walk(node: TreeNode) {
 		const subtreeStatus = computeSubtreeStatus(node);
+		const role = promiseRole(node.promise);
+		const functionName = node.promise.tags?.['resonate:invoke'];
+
+		// For sleep promises, extract the timeout duration
+		let sleepDuration: number | undefined;
+		if (role === 'sleep') {
+			const timeoutTag = node.promise.tags?.['resonate:timeout'];
+			if (timeoutTag) {
+				// Timeout tag might be in milliseconds as a string
+				const parsed = parseInt(timeoutTag, 10);
+				if (!isNaN(parsed)) {
+					sleepDuration = parsed;
+				}
+			} else if (node.promise.timeout) {
+				// Fallback to timeout field
+				sleepDuration = node.promise.timeout;
+			}
+		}
+
 		nodes.push({
 			id: node.promise.id,
 			type: 'promise',
@@ -280,9 +303,11 @@ export function treeToGraphData(
 				promise: node.promise,
 				subtreeStatus,
 				duration: computeDuration(node.promise),
-				role: promiseRole(node.promise),
+				role,
 				childCount: node.children.length,
-				label: promiseLabel(node.promise)
+				label: promiseLabel(node.promise),
+				functionName,
+				sleepDuration
 			},
 			position: { x: 0, y: 0 }
 		});
