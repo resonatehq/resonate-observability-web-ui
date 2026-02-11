@@ -2,6 +2,7 @@
 	import type { Schedule } from '$lib/api/client';
 	import { searchPromisesWithCursor } from '$lib/api/client';
 	import Badge from './Badge.svelte';
+	import { untrack } from 'svelte';
 
 	interface Props {
 		schedules: Schedule[];
@@ -16,8 +17,12 @@
 	}
 
 	let schedulesWithStatus: ScheduleWithStatus[] = $state([]);
+	let loadedScheduleIds = new Set<string>();
 
 	async function loadScheduleStatus(schedule: ScheduleWithStatus) {
+		if (loadedScheduleIds.has(schedule.id)) return;
+		loadedScheduleIds.add(schedule.id);
+
 		schedule.loading = true;
 		try {
 			// Fetch most recent promise for this schedule
@@ -40,11 +45,17 @@
 	}
 
 	$effect(() => {
-		schedulesWithStatus = schedules.map((s) => ({ ...s, loading: true }));
-		// Load status for each schedule
-		for (const schedule of schedulesWithStatus) {
-			loadScheduleStatus(schedule);
-		}
+		// Only react to changes in the schedules prop
+		const currentSchedules = schedules;
+
+		// Use untrack to prevent the effect from re-running when we modify schedulesWithStatus
+		untrack(() => {
+			schedulesWithStatus = currentSchedules.map((s) => ({ ...s, loading: true }));
+			// Load status for each schedule
+			for (const schedule of schedulesWithStatus) {
+				loadScheduleStatus(schedule);
+			}
+		});
 	});
 
 	function formatTime(timestamp: number | undefined): string {
