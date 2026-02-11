@@ -97,6 +97,25 @@
 		return result;
 	}
 
+	function formatData(data: string | undefined): { formatted: string; hasTarget: boolean; target?: string } {
+		if (!data) return { formatted: '', hasTarget: false };
+
+		try {
+			const parsed = JSON.parse(data);
+			if (parsed && typeof parsed === 'object' && 'target' in parsed) {
+				return {
+					formatted: JSON.stringify(parsed, null, 2),
+					hasTarget: true,
+					target: parsed.target
+				};
+			}
+		} catch {
+			// Not JSON, return as-is
+		}
+
+		return { formatted: data, hasTarget: false };
+	}
+
 	let rootStatus = $derived<SubtreeStatus>(root ? computeSubtreeStatus(root) : 'pending');
 	let rootDuration = $derived(root ? computeDuration(root.promise) : null);
 	let allNodes = $derived<TreeNode[]>(root ? flattenTree(root) : []);
@@ -249,13 +268,23 @@
 					{/if}
 
 					{#if selectedPromise.param?.data}
+						{@const formatted = formatData(selectedPromise.param.data)}
+						{#if formatted.hasTarget && formatted.target}
+							<h4>Target</h4>
+							<div class="target-value mono">target: {formatted.target}</div>
+						{/if}
 						<h4>Parameters</h4>
-						<pre class="code-block">{selectedPromise.param.data}</pre>
+						<pre class="code-block">{formatted.formatted}</pre>
 					{/if}
 
 					{#if selectedPromise.value?.data}
+						{@const formatted = formatData(selectedPromise.value.data)}
+						{#if formatted.hasTarget && formatted.target}
+							<h4>Target</h4>
+							<div class="target-value mono">target: {formatted.target}</div>
+						{/if}
 						<h4>Value</h4>
-						<pre class="code-block">{selectedPromise.value.data}</pre>
+						<pre class="code-block">{formatted.formatted}</pre>
 					{/if}
 
 					<div class="detail-actions">
@@ -459,5 +488,15 @@
 
 	.detail-actions {
 		margin-top: 0.75rem;
+	}
+
+	.target-value {
+		padding: 0.5rem 0.75rem;
+		background: var(--bg);
+		border: 1px solid var(--secondary);
+		border-radius: 4px;
+		font-size: 0.875rem;
+		color: var(--secondary);
+		margin-bottom: 0.75rem;
 	}
 </style>

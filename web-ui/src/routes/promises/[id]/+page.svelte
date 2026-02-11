@@ -23,6 +23,25 @@
 				loading = false;
 			});
 	});
+
+	function formatData(data: string | undefined): { formatted: string; hasTarget: boolean; target?: string } {
+		if (!data) return { formatted: '', hasTarget: false };
+
+		try {
+			const parsed = JSON.parse(data);
+			if (parsed && typeof parsed === 'object' && 'target' in parsed) {
+				return {
+					formatted: JSON.stringify(parsed, null, 2),
+					hasTarget: true,
+					target: parsed.target
+				};
+			}
+		} catch {
+			// Not JSON, return as-is
+		}
+
+		return { formatted: data, hasTarget: false };
+	}
 </script>
 
 <div class="page-header">
@@ -76,13 +95,18 @@
 					<dl>
 						{#each Object.entries(promise.param.headers) as [k, v]}
 							<dt>{k}</dt>
-							<dd class="mono">{v}</dd>
+							<dd class="mono">{k === 'target' ? `target: ${v}` : v}</dd>
 						{/each}
 					</dl>
 				{/if}
 				{#if promise.param.data}
+					{@const formatted = formatData(promise.param.data)}
+					{#if formatted.hasTarget && formatted.target}
+						<h4>Target</h4>
+						<div class="target-value mono">target: {formatted.target}</div>
+					{/if}
 					<h4>Data</h4>
-					<pre class="code-block">{promise.param.data}</pre>
+					<pre class="code-block">{formatted.formatted}</pre>
 				{/if}
 			</div>
 		{/if}
@@ -95,13 +119,18 @@
 					<dl>
 						{#each Object.entries(promise.value.headers) as [k, v]}
 							<dt>{k}</dt>
-							<dd class="mono">{v}</dd>
+							<dd class="mono">{k === 'target' ? `target: ${v}` : v}</dd>
 						{/each}
 					</dl>
 				{/if}
 				{#if promise.value.data}
+					{@const formatted = formatData(promise.value.data)}
+					{#if formatted.hasTarget && formatted.target}
+						<h4>Target</h4>
+						<div class="target-value mono">target: {formatted.target}</div>
+					{/if}
 					<h4>Data</h4>
-					<pre class="code-block">{promise.value.data}</pre>
+					<pre class="code-block">{formatted.formatted}</pre>
 				{/if}
 			</div>
 		{/if}
@@ -163,5 +192,15 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+
+	.target-value {
+		padding: 0.5rem 0.75rem;
+		background: var(--bg);
+		border: 1px solid var(--secondary);
+		border-radius: 4px;
+		font-size: 0.875rem;
+		color: var(--secondary);
+		margin-bottom: 0.75rem;
 	}
 </style>
