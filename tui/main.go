@@ -14,7 +14,7 @@ import (
 
 func main() {
 	server := flag.String("server", "http://localhost:8001", "Resonate server URL")
-	view := flag.String("view", "list", "Initial view: list or tree")
+	view := flag.String("view", "", "Initial view: graphs (default), list, or tree")
 	rootID := flag.String("root", "", "Root promise ID for tree view")
 	refresh := flag.Duration("refresh", 5*time.Second, "Auto-refresh interval (0 to disable)")
 	token := flag.String("token", "", "JWT bearer token for authentication")

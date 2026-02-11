@@ -21,7 +21,7 @@ type TreeNode struct {
 
 // BuildTree constructs a tree from a flat list of promises.
 // The root is identified by rootID. Parent-child relationships come from the
-// "resonate:parent" tag.
+// "resonate:parent" tag, with fallback to ID prefix matching.
 func BuildTree(rootID string, promises []client.Promise) *TreeNode {
 	childrenMap := map[string][]*TreeNode{}
 	nodeMap := map[string]*TreeNode{}
@@ -29,8 +29,17 @@ func BuildTree(rootID string, promises []client.Promise) *TreeNode {
 	for _, p := range promises {
 		node := &TreeNode{Promise: p, Expanded: true}
 		nodeMap[p.ID] = node
+
+		// First try tag-based parent
 		if parent, ok := p.Tags["resonate:parent"]; ok && parent != p.ID {
 			childrenMap[parent] = append(childrenMap[parent], node)
+		} else {
+			// Fallback: use ID prefix matching
+			// e.g., "countdown-123.2" is a child of "countdown-123"
+			parentID := inferParentFromID(p.ID)
+			if parentID != "" && parentID != p.ID {
+				childrenMap[parentID] = append(childrenMap[parentID], node)
+			}
 		}
 	}
 
@@ -62,6 +71,18 @@ func BuildTree(rootID string, promises []client.Promise) *TreeNode {
 	assign(root)
 
 	return root
+}
+
+// inferParentFromID tries to infer a parent ID from the promise ID structure.
+// e.g., "countdown-123.2.1" -> "countdown-123.2"
+//       "countdown-123.2" -> "countdown-123"
+func inferParentFromID(id string) string {
+	// Find the last dot
+	lastDot := strings.LastIndex(id, ".")
+	if lastDot > 0 {
+		return id[:lastDot]
+	}
+	return ""
 }
 
 // FlattenVisible returns a flat list of visible nodes (respecting Expanded state).
