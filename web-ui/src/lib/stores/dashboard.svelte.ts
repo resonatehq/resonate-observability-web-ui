@@ -30,10 +30,10 @@ class DashboardStore {
 		this.loading = true;
 		this.error = null;
 		try {
-			// Fetch recent promises (last 500 for stats)
+			// Fetch recent promises (last 100 for stats - API limit)
 			const promiseResult = await searchPromisesWithCursor({
 				id: '*',
-				limit: 500,
+				limit: 100,
 				sortId: -1 // Most recent first
 			});
 			this.promises = promiseResult.promises;
