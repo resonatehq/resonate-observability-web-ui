@@ -35,8 +35,11 @@
 	let stateFilter = $state('');
 	let sortMode = $state<'created-desc' | 'created-asc'>('created-desc');
 
-	async function loadWorkflows(append = false) {
-		loading = true;
+	async function loadWorkflows(append = false, isRefresh = false) {
+		// Only show loading spinner on initial load, not on refresh
+		if (!isRefresh) {
+			loading = true;
+		}
 		try {
 			const result = await searchPromisesWithCursor({
 				id: '*',
@@ -48,16 +51,22 @@
 
 			const roots = result.promises.filter((p) => isRootInSet(p, result.promises));
 
-			const newItems: WorkflowItem[] = roots.map((p) => ({
-				promise: p,
-				tree: null,
-				loading: false,
-				totalSteps: 0,
-				completedSteps: 0,
-				rejectedSteps: 0,
-				pendingSteps: 0,
-				subtreeStatus: 'pending' as SubtreeStatus
-			}));
+			// On refresh, preserve existing tree data and expanded state
+			const existingWorkflows = new Map(workflows.map((w) => [w.promise.id, w]));
+
+			const newItems: WorkflowItem[] = roots.map((p) => {
+				const existing = existingWorkflows.get(p.id);
+				return {
+					promise: p,
+					tree: existing?.tree ?? null,
+					loading: existing?.loading ?? false,
+					totalSteps: existing?.totalSteps ?? 0,
+					completedSteps: existing?.completedSteps ?? 0,
+					rejectedSteps: existing?.rejectedSteps ?? 0,
+					pendingSteps: existing?.pendingSteps ?? 0,
+					subtreeStatus: existing?.subtreeStatus ?? ('pending' as SubtreeStatus)
+				};
+			});
 
 			if (append) {
 				workflows = [...workflows, ...newItems];
@@ -138,8 +147,8 @@
 	}
 
 	$effect(() => {
-		loadWorkflows();
-		const interval = setInterval(() => loadWorkflows(), 5000);
+		loadWorkflows(false, false); // Initial load
+		const interval = setInterval(() => loadWorkflows(false, true), 5000); // Background refresh
 		return () => clearInterval(interval);
 	});
 </script>

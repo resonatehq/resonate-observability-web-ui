@@ -24,8 +24,11 @@
 	let totalSteps = $state(0);
 	let completedSteps = $state(0);
 
-	async function loadTree(rootId: string) {
-		loading = true;
+	async function loadTree(rootId: string, isRefresh = false) {
+		// Only show loading spinner on initial load, not on refresh
+		if (!isRefresh || !root) {
+			loading = true;
+		}
 		try {
 			const promises = await fetchTreePromises(rootId, async (params) =>
 				searchPromisesWithCursor({ ...params, id: params.id || '*' })
@@ -99,8 +102,8 @@
 
 	$effect(() => {
 		const id = page.params.id!;
-		loadTree(id);
-		const interval = setInterval(() => loadTree(id), 5000);
+		loadTree(id, false); // Initial load
+		const interval = setInterval(() => loadTree(id, true), 5000); // Background refresh
 		return () => clearInterval(interval);
 	});
 </script>
