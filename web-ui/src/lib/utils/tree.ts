@@ -366,3 +366,18 @@ function layoutWithDagre(
 
 	return { nodes: positionedNodes, edges };
 }
+
+/**
+ * Flattens a tree into an array of all nodes in depth-first order.
+ */
+export function flattenTree(root: TreeNode): TreeNode[] {
+	const result: TreeNode[] = [];
+	function walk(node: TreeNode) {
+		result.push(node);
+		for (const child of node.children) {
+			walk(child);
+		}
+	}
+	walk(root);
+	return result;
+}

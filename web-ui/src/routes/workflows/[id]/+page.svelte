@@ -13,6 +13,7 @@
 		type SubtreeStatus
 	} from '$lib/utils/tree';
 	import WorkflowGraph from '$lib/components/graph/WorkflowGraph.svelte';
+	import TimelineView from '$lib/components/timeline/TimelineView.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 
 	let root: TreeNode | null = $state(null);
@@ -168,9 +169,7 @@
 				</div>
 			{:else if activeTab === 'timeline'}
 				<div class="timeline-container">
-					<div class="timeline-placeholder">
-						Timeline view coming in Phase 2
-					</div>
+					<TimelineView tree={root} onBarClick={handleNodeClick} />
 				</div>
 			{:else if activeTab === 'list'}
 				<div class="list-container">
@@ -377,12 +376,6 @@
 		border-radius: 0 0 8px 8px;
 		overflow-y: auto;
 		max-height: 100%;
-	}
-
-	.timeline-placeholder {
-		padding: 3rem;
-		text-align: center;
-		color: var(--text-muted);
 	}
 
 	.role-tag {
