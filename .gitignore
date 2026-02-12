@@ -1,10 +1,14 @@
-# Go binaries
-tui/resonate-observability-tui
-tui/tui
-
-# Node
-web-ui/node_modules/
-web-ui/.svelte-kit/
+node_modules/
+/build/
+/.svelte-kit/
+/dist/
 
 # OS
 .DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
