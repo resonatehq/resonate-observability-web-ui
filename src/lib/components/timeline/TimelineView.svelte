@@ -14,11 +14,11 @@
 	let timelineData = $derived(treeToTimelineData(tree));
 
 	// SVG dimensions
-	const PADDING_LEFT = 200;
+	const PADDING_LEFT = 40;
 	const PADDING_RIGHT = 40;
 	const PADDING_TOP = 40;
 	const PADDING_BOTTOM = 20;
-	const TIMELINE_WIDTH = 800;
+	const TIMELINE_WIDTH = 900;
 
 	let svgHeight = $derived(
 		Math.max(timelineData.bars.length * 28, 100) + PADDING_TOP + PADDING_BOTTOM
@@ -49,15 +49,6 @@
 						width={TIMELINE_WIDTH}
 						onClick={onBarClick}
 					/>
-				{/each}
-			</g>
-
-			<!-- Labels on left -->
-			<g transform="translate(0, {PADDING_TOP + 30})">
-				{#each timelineData.bars as bar}
-					<text x={PADDING_LEFT - 8} y={bar.y + 14} class="row-label" text-anchor="end">
-						{bar.label.length > 25 ? bar.label.slice(0, 25) + '...' : bar.label}
-					</text>
 				{/each}
 			</g>
 		</svg>

@@ -241,11 +241,7 @@ export function formatDuration(ms: number): string {
  * e.g., "order-abc-123" -> "order-abc-123"
  */
 export function promiseLabel(p: Promise): string {
-	// If the promise has an invoke tag, use that as the label
-	if (p.tags?.['resonate:invoke']) {
-		return p.tags['resonate:invoke'];
-	}
-	// Otherwise use the last segment after the last dot
+	// Use the last segment after the last dot
 	const lastDot = p.id.lastIndexOf('.');
 	if (lastDot > 0) {
 		const segment = p.id.substring(lastDot + 1);
@@ -278,7 +274,21 @@ export function treeToGraphData(
 	function walk(node: TreeNode) {
 		const subtreeStatus = computeSubtreeStatus(node);
 		const role = promiseRole(node.promise);
-		const functionName = node.promise.tags?.['resonate:invoke'];
+
+		// Extract function name from param.data if available
+		let functionName: string | undefined;
+		if (node.promise.param?.data) {
+			try {
+				// Decode base64 and parse JSON
+				const decoded = atob(node.promise.param.data);
+				const paramData = JSON.parse(decoded);
+				if (paramData?.func) {
+					functionName = paramData.func;
+				}
+			} catch {
+				// Ignore parse/decode errors
+			}
+		}
 
 		// For sleep promises, extract the timeout duration
 		let sleepDuration: number | undefined;

@@ -97,23 +97,35 @@
 		return result;
 	}
 
-	function formatData(data: string | undefined): { formatted: string; hasTarget: boolean; target?: string } {
+	function formatData(data: string | undefined): { formatted: string; hasTarget: boolean; target?: string; funcName?: string } {
 		if (!data) return { formatted: '', hasTarget: false };
 
 		try {
-			const parsed = JSON.parse(data);
+			// Try to decode from base64 first
+			const decoded = atob(data);
+			const parsed = JSON.parse(decoded);
+
+			// Extract function name if present
+			const funcName = parsed?.func;
+
 			if (parsed && typeof parsed === 'object' && 'target' in parsed) {
 				return {
 					formatted: JSON.stringify(parsed, null, 2),
 					hasTarget: true,
-					target: parsed.target
+					target: parsed.target,
+					funcName
 				};
 			}
-		} catch {
-			// Not JSON, return as-is
-		}
 
-		return { formatted: data, hasTarget: false };
+			return {
+				formatted: JSON.stringify(parsed, null, 2),
+				hasTarget: false,
+				funcName
+			};
+		} catch {
+			// Not base64 or not JSON, return as-is
+			return { formatted: data, hasTarget: false };
+		}
 	}
 
 	let rootStatus = $derived<SubtreeStatus>(root ? computeSubtreeStatus(root) : 'pending');
@@ -269,9 +281,13 @@
 
 					{#if selectedPromise.param?.data}
 						{@const formatted = formatData(selectedPromise.param.data)}
+						{#if formatted.funcName}
+							<h4>Function</h4>
+							<div class="func-value mono">{formatted.funcName}</div>
+						{/if}
 						{#if formatted.hasTarget && formatted.target}
 							<h4>Target</h4>
-							<div class="target-value mono">target: {formatted.target}</div>
+							<div class="target-value mono">{formatted.target}</div>
 						{/if}
 						<h4>Parameters</h4>
 						<pre class="code-block">{formatted.formatted}</pre>
@@ -490,7 +506,8 @@
 		margin-top: 0.75rem;
 	}
 
-	.target-value {
+	.target-value,
+	.func-value {
 		padding: 0.5rem 0.75rem;
 		background: var(--bg);
 		border: 1px solid var(--secondary);
@@ -498,5 +515,10 @@
 		font-size: 0.875rem;
 		color: var(--secondary);
 		margin-bottom: 0.75rem;
+	}
+
+	.func-value {
+		font-weight: 600;
+		font-size: 1rem;
 	}
 </style>

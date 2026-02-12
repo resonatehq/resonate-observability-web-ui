@@ -64,10 +64,10 @@
 		class="bar-rect"
 	/>
 
-	<!-- Label (only show if bar is wide enough) -->
-	{#if barWidth > 60}
+	<!-- Label (show if bar is wide enough) -->
+	{#if barWidth > 40}
 		<text x={x + 4} y={bar.y + 14} class="bar-label" fill={roleColor(bar.role)}>
-			{bar.label.length > 20 ? bar.label.slice(0, 20) + '...' : bar.label}
+			{bar.label.length > Math.floor(barWidth / 7) ? bar.label.slice(0, Math.floor(barWidth / 7)) + '...' : bar.label}
 		</text>
 	{/if}
 </g>
