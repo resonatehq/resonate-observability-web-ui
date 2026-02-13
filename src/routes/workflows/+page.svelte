@@ -30,6 +30,7 @@
 	let loading = $state(false);
 	let cursor: string | undefined = $state(undefined);
 	let hasMore = $state(false);
+	let pagesLoaded = $state(1); // Track how many pages we've loaded
 
 	// Filters
 	let stateFilter = $state('');
@@ -41,15 +42,30 @@
 			loading = true;
 		}
 		try {
-			const result = await searchPromisesWithCursor({
-				id: '*',
-				state: stateFilter || undefined,
-				limit: 20,
-				cursor: append ? cursor : undefined,
-				sortId: sortMode === 'created-desc' ? -1 : 1
-			});
+			// On refresh, re-fetch all pages that were previously loaded
+			const pagesToFetch = isRefresh ? pagesLoaded : 1;
+			let allRoots: Promise[] = [];
+			let tempCursor: string | undefined = append ? cursor : undefined;
+			let lastCursor: string | undefined;
 
-			const roots = result.promises.filter((p) => isRootInSet(p, result.promises));
+			for (let i = 0; i < pagesToFetch; i++) {
+				const result = await searchPromisesWithCursor({
+					id: '*',
+					state: stateFilter || undefined,
+					limit: 20,
+					cursor: tempCursor,
+					sortId: sortMode === 'created-desc' ? -1 : 1
+				});
+
+				allRoots.push(...result.promises);
+				lastCursor = result.cursor;
+				tempCursor = result.cursor;
+
+				// Break if no more pages
+				if (!result.cursor) break;
+			}
+
+			const roots = allRoots.filter((p) => isRootInSet(p, allRoots));
 
 			// On refresh, preserve existing tree data and expanded state
 			const existingWorkflows = new Map(workflows.map((w) => [w.promise.id, w]));
@@ -70,12 +86,16 @@
 
 			if (append) {
 				workflows = [...workflows, ...newItems];
+				pagesLoaded += 1; // Increment pages loaded
 			} else {
 				workflows = newItems;
+				if (!isRefresh) {
+					pagesLoaded = 1; // Reset on filter change
+				}
 			}
 
-			cursor = result.cursor;
-			hasMore = !!result.cursor;
+			cursor = lastCursor;
+			hasMore = !!lastCursor;
 			error = null;
 
 			// Lazy-load trees for visible workflows
