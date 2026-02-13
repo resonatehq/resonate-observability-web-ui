@@ -40,10 +40,7 @@
 	async function loadWorkflows(append = false, isRefresh = false) {
 		// Prevent concurrent loads - skip refresh if already loading
 		if (isLoadInProgress) {
-			if (isRefresh) return; // Skip refresh if load in progress
-			// For non-refresh loads, wait briefly and retry
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			if (isLoadInProgress) return; // Still busy, give up
+			return; // Skip if already loading
 		}
 
 		isLoadInProgress = true;
