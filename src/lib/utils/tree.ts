@@ -322,7 +322,11 @@ export function treeToGraphData(
 			position: { x: 0, y: 0 }
 		});
 
-		for (const child of node.children) {
+		// For TB layout, reverse children order to get left-to-right display
+		// (dagre places them right-to-left by default)
+		const childrenToProcess = direction === 'TB' ? [...node.children].reverse() : node.children;
+
+		for (const child of childrenToProcess) {
 			const childSubtreeStatus = computeSubtreeStatus(child);
 			edges.push({
 				id: `${node.promise.id}->${child.promise.id}`,
