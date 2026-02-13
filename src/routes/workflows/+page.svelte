@@ -70,8 +70,8 @@
 				allPromises.push(...result.promises);
 				lastCursor = result.cursor;
 
-				// If no more results or we're just appending one page, break
-				if (!result.cursor || (append && !isRefresh)) {
+				// Break if: no more results, just appending one page, or got empty results
+				if (!result.cursor || (append && !isRefresh) || result.promises.length === 0) {
 					break;
 				}
 
