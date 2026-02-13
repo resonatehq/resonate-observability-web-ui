@@ -322,7 +322,11 @@ export function treeToGraphData(
 			position: { x: 0, y: 0 }
 		});
 
-		for (const child of node.children) {
+		// For TB layout, reverse children order to get left-to-right display
+		// (dagre places them right-to-left by default)
+		const childrenToProcess = direction === 'TB' ? [...node.children].reverse() : node.children;
+
+		for (const child of childrenToProcess) {
 			const childSubtreeStatus = computeSubtreeStatus(child);
 			edges.push({
 				id: `${node.promise.id}->${child.promise.id}`,
@@ -352,13 +356,7 @@ function layoutWithDagre(
 ): { nodes: Node<GraphNodeData>[]; edges: Edge<GraphEdgeData>[] } {
 	const g = new dagre.graphlib.Graph();
 	g.setDefaultEdgeLabel(() => ({}));
-	// For TB layout, use 'UL' (upper-left) alignment to ensure left-to-right ordering
-	g.setGraph({
-		rankdir: direction,
-		nodesep: 50,
-		ranksep: 80,
-		align: direction === 'TB' ? 'UL' : undefined
-	});
+	g.setGraph({ rankdir: direction, nodesep: 50, ranksep: 80 });
 
 	for (const node of nodes) {
 		g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
