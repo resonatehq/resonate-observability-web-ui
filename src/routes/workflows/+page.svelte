@@ -42,18 +42,35 @@
 			loading = true;
 		}
 		try {
-			// On refresh, fetch enough items to match current count
-			const itemsToFetch = isRefresh ? targetLoadCount : 20;
+			// Fetch items in batches if needed (API likely has 20-item limit per request)
+			const itemsNeeded = isRefresh ? targetLoadCount : 20;
+			let allPromises: Promise[] = [];
+			let currentCursor: string | undefined = append ? cursor : undefined;
+			let lastCursor: string | undefined;
 
-			const result = await searchPromisesWithCursor({
-				id: '*',
-				state: stateFilter || undefined,
-				limit: itemsToFetch,
-				cursor: append ? cursor : undefined,
-				sortId: sortMode === 'created-desc' ? -1 : 1
-			});
+			// For refresh, fetch multiple pages if needed to get all items
+			while (allPromises.length < itemsNeeded) {
+				const batchSize = Math.min(20, itemsNeeded - allPromises.length);
+				const result = await searchPromisesWithCursor({
+					id: '*',
+					state: stateFilter || undefined,
+					limit: batchSize,
+					cursor: currentCursor,
+					sortId: sortMode === 'created-desc' ? -1 : 1
+				});
 
-			const roots = result.promises.filter((p) => isRootInSet(p, result.promises));
+				allPromises.push(...result.promises);
+				lastCursor = result.cursor;
+
+				// If no more results or we're just appending one page, break
+				if (!result.cursor || (append && !isRefresh)) {
+					break;
+				}
+
+				currentCursor = result.cursor;
+			}
+
+			const roots = allPromises.filter((p) => isRootInSet(p, allPromises));
 
 			// On refresh, preserve existing tree data and expanded state
 			const existingWorkflows = new Map(workflows.map((w) => [w.promise.id, w]));
@@ -82,8 +99,8 @@
 				}
 			}
 
-			cursor = result.cursor;
-			hasMore = !!result.cursor;
+			cursor = lastCursor;
+			hasMore = !!lastCursor;
 			error = null;
 
 			// Lazy-load trees for visible workflows
