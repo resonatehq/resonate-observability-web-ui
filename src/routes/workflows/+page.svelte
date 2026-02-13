@@ -30,7 +30,7 @@
 	let loading = $state(false);
 	let cursor: string | undefined = $state(undefined);
 	let hasMore = $state(false);
-	let targetLoadCount = $state(20); // Track how many items we want to keep loaded
+	let pagesLoaded = $state(1); // Track how many pages we've loaded
 
 	// Filters
 	let stateFilter = $state('');
@@ -42,35 +42,30 @@
 			loading = true;
 		}
 		try {
-			// Fetch items in batches if needed (API likely has 20-item limit per request)
-			const itemsNeeded = isRefresh ? targetLoadCount : 20;
-			let allPromises: Promise[] = [];
-			let currentCursor: string | undefined = append ? cursor : undefined;
+			// On refresh, re-fetch all pages that were previously loaded
+			const pagesToFetch = isRefresh ? pagesLoaded : 1;
+			let allRoots: Promise[] = [];
+			let tempCursor: string | undefined = append ? cursor : undefined;
 			let lastCursor: string | undefined;
 
-			// For refresh, fetch multiple pages if needed to get all items
-			while (allPromises.length < itemsNeeded) {
-				const batchSize = Math.min(20, itemsNeeded - allPromises.length);
+			for (let i = 0; i < pagesToFetch; i++) {
 				const result = await searchPromisesWithCursor({
 					id: '*',
 					state: stateFilter || undefined,
-					limit: batchSize,
-					cursor: currentCursor,
+					limit: 20,
+					cursor: tempCursor,
 					sortId: sortMode === 'created-desc' ? -1 : 1
 				});
 
-				allPromises.push(...result.promises);
+				allRoots.push(...result.promises);
 				lastCursor = result.cursor;
+				tempCursor = result.cursor;
 
-				// If no more results or we're just appending one page, break
-				if (!result.cursor || (append && !isRefresh)) {
-					break;
-				}
-
-				currentCursor = result.cursor;
+				// Break if no more pages
+				if (!result.cursor) break;
 			}
 
-			const roots = allPromises.filter((p) => isRootInSet(p, allPromises));
+			const roots = allRoots.filter((p) => isRootInSet(p, allRoots));
 
 			// On refresh, preserve existing tree data and expanded state
 			const existingWorkflows = new Map(workflows.map((w) => [w.promise.id, w]));
@@ -91,11 +86,11 @@
 
 			if (append) {
 				workflows = [...workflows, ...newItems];
-				targetLoadCount = workflows.length; // Update target count when loading more
+				pagesLoaded += 1; // Increment pages loaded
 			} else {
 				workflows = newItems;
 				if (!isRefresh) {
-					targetLoadCount = 20; // Reset on filter change
+					pagesLoaded = 1; // Reset on filter change
 				}
 			}
 
