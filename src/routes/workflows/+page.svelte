@@ -28,7 +28,6 @@
 	let workflows: WorkflowItem[] = $state([]);
 	let error: string | null = $state(null);
 	let loading = $state(false);
-	let isLoadInProgress = $state(false); // Prevent concurrent loads
 	let cursor: string | undefined = $state(undefined);
 	let hasMore = $state(false);
 	let targetLoadCount = $state(20); // Track how many items we want to keep loaded
@@ -38,47 +37,23 @@
 	let sortMode = $state<'created-desc' | 'created-asc'>('created-desc');
 
 	async function loadWorkflows(append = false, isRefresh = false) {
-		// Prevent concurrent loads - skip refresh if already loading
-		if (isLoadInProgress) {
-			return; // Skip if already loading
-		}
-
-		isLoadInProgress = true;
-
 		// Only show loading spinner on initial load, not on refresh
 		if (!isRefresh) {
 			loading = true;
 		}
 		try {
-			// Fetch items in batches if needed (API likely has 20-item limit per request)
-			const itemsNeeded = isRefresh ? targetLoadCount : 20;
-			let allPromises: Promise[] = [];
-			let currentCursor: string | undefined = append ? cursor : undefined;
-			let lastCursor: string | undefined;
+			// On refresh, fetch enough items to match current count
+			const itemsToFetch = isRefresh ? targetLoadCount : 20;
 
-			// For refresh, fetch multiple pages if needed to get all items
-			while (allPromises.length < itemsNeeded) {
-				const batchSize = Math.min(20, itemsNeeded - allPromises.length);
-				const result = await searchPromisesWithCursor({
-					id: '*',
-					state: stateFilter || undefined,
-					limit: batchSize,
-					cursor: currentCursor,
-					sortId: sortMode === 'created-desc' ? -1 : 1
-				});
+			const result = await searchPromisesWithCursor({
+				id: '*',
+				state: stateFilter || undefined,
+				limit: itemsToFetch,
+				cursor: append ? cursor : undefined,
+				sortId: sortMode === 'created-desc' ? -1 : 1
+			});
 
-				allPromises.push(...result.promises);
-				lastCursor = result.cursor;
-
-				// Break if: no more results, just appending one page, or got empty results
-				if (!result.cursor || (append && !isRefresh) || result.promises.length === 0) {
-					break;
-				}
-
-				currentCursor = result.cursor;
-			}
-
-			const roots = allPromises.filter((p) => isRootInSet(p, allPromises));
+			const roots = result.promises.filter((p) => isRootInSet(p, result.promises));
 
 			// On refresh, preserve existing tree data and expanded state
 			const existingWorkflows = new Map(workflows.map((w) => [w.promise.id, w]));
@@ -107,8 +82,8 @@
 				}
 			}
 
-			cursor = lastCursor;
-			hasMore = !!lastCursor;
+			cursor = result.cursor;
+			hasMore = !!result.cursor;
 			error = null;
 
 			// Lazy-load trees for visible workflows
@@ -121,7 +96,6 @@
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
 			loading = false;
-			isLoadInProgress = false;
 		}
 	}
 
