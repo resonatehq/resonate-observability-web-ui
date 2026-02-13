@@ -30,6 +30,7 @@
 	let loading = $state(false);
 	let cursor: string | undefined = $state(undefined);
 	let hasMore = $state(false);
+	let targetLoadCount = $state(20); // Track how many items we want to keep loaded
 
 	// Filters
 	let stateFilter = $state('');
@@ -41,10 +42,13 @@
 			loading = true;
 		}
 		try {
+			// On refresh, fetch enough items to match current count
+			const itemsToFetch = isRefresh ? targetLoadCount : 20;
+
 			const result = await searchPromisesWithCursor({
 				id: '*',
 				state: stateFilter || undefined,
-				limit: 20,
+				limit: itemsToFetch,
 				cursor: append ? cursor : undefined,
 				sortId: sortMode === 'created-desc' ? -1 : 1
 			});
@@ -70,8 +74,12 @@
 
 			if (append) {
 				workflows = [...workflows, ...newItems];
+				targetLoadCount = workflows.length; // Update target count when loading more
 			} else {
 				workflows = newItems;
+				if (!isRefresh) {
+					targetLoadCount = 20; // Reset on filter change
+				}
 			}
 
 			cursor = result.cursor;

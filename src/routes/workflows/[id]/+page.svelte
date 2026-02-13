@@ -208,8 +208,8 @@
 						<thead>
 							<tr>
 								<th>Promise</th>
-								<th>State</th>
-								<th>Role</th>
+								<th>Status</th>
+								<th>Type</th>
 								<th>Duration</th>
 								<th>Created</th>
 							</tr>
@@ -250,9 +250,9 @@
 					<dl class="detail-fields">
 						<dt>ID</dt>
 						<dd class="mono">{selectedPromise.id}</dd>
-						<dt>State</dt>
+						<dt>Status</dt>
 						<dd><Badge state={selectedPromise.state} /></dd>
-						<dt>Role</dt>
+						<dt>Type</dt>
 						<dd>{promiseRole(selectedPromise)}</dd>
 						{#if computeDuration(selectedPromise) != null}
 							<dt>Duration</dt>

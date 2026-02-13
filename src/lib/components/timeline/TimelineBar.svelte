@@ -44,6 +44,25 @@
 		}
 	}
 
+	// Use high-contrast text color based on bar state for better readability
+	function textColor(state: string): string {
+		switch (state) {
+			case 'RESOLVED':
+				// White text on green background for better contrast
+				return '#ffffff';
+			case 'PENDING':
+				// Dark text on yellow background
+				return '#1a1d24';
+			case 'REJECTED':
+			case 'REJECTED_CANCELED':
+			case 'REJECTED_TIMEDOUT':
+				// White text on red background
+				return '#ffffff';
+			default:
+				return 'var(--text)';
+		}
+	}
+
 	let isPending = $derived(bar.state === 'PENDING');
 
 	function handleClick() {
@@ -66,7 +85,7 @@
 
 	<!-- Label (show if bar is wide enough) -->
 	{#if barWidth > 40}
-		<text x={x + 4} y={bar.y + 14} class="bar-label" fill={roleColor(bar.role)}>
+		<text x={x + 4} y={bar.y + 14} class="bar-label" fill={textColor(bar.state)}>
 			{bar.label.length > Math.floor(barWidth / 7) ? bar.label.slice(0, Math.floor(barWidth / 7)) + '...' : bar.label}
 		</text>
 	{/if}

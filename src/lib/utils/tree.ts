@@ -352,7 +352,13 @@ function layoutWithDagre(
 ): { nodes: Node<GraphNodeData>[]; edges: Edge<GraphEdgeData>[] } {
 	const g = new dagre.graphlib.Graph();
 	g.setDefaultEdgeLabel(() => ({}));
-	g.setGraph({ rankdir: direction, nodesep: 50, ranksep: 80 });
+	// For TB layout, use 'UL' (upper-left) alignment to ensure left-to-right ordering
+	g.setGraph({
+		rankdir: direction,
+		nodesep: 50,
+		ranksep: 80,
+		align: direction === 'TB' ? 'UL' : undefined
+	});
 
 	for (const node of nodes) {
 		g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });

@@ -59,7 +59,7 @@
 	<div class="node-header">
 		<span class="node-label" title={id}>{data.label}</span>
 		{#if data.role !== 'root'}
-			<span class="node-role role-{data.role}">{data.role}</span>
+			<span class="node-type type-{data.role}">{data.role}</span>
 		{/if}
 	</div>
 
@@ -139,7 +139,7 @@
 		flex: 1;
 	}
 
-	.node-role {
+	.node-type {
 		font-size: 0.625rem;
 		padding: 0.0625rem 0.3125rem;
 		border-radius: 3px;
@@ -149,17 +149,17 @@
 		flex-shrink: 0;
 	}
 
-	.role-rpc {
+	.type-rpc {
 		background: rgba(30, 227, 207, 0.12);
 		color: var(--secondary, #1ee3cf);
 	}
 
-	.role-run {
+	.type-run {
 		background: rgba(168, 85, 247, 0.12);
 		color: #a855f7;
 	}
 
-	.role-sleep {
+	.type-sleep {
 		background: rgba(148, 163, 184, 0.12);
 		color: var(--muted, #94a3b8);
 	}

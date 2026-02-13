@@ -137,7 +137,7 @@
 	</div>
 
 	<div style="margin-top: 2rem;">
-		<a href="/tree/{promise.id}" class="btn btn-primary">View Call Tree</a>
+		<a href="/workflows/{promise.id}" class="btn btn-primary">View Call Tree</a>
 	</div>
 {/if}
 
