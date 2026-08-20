@@ -5,7 +5,7 @@
 
 	let query = $state('');
 	let schedules: Schedule[] = $state([]);
-	let error: string | null = $state(null);
+	let error = $state<string | null>(null);
 	let loading = $state(true);
 
 	async function load() {

@@ -48,7 +48,7 @@ A browser-based dashboard for exploring and debugging [Resonate](https://github.
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20.19+, 22.12+, or 24+ (required by Vite 8)
 - npm
 - A running [Resonate server](https://github.com/resonatehq/resonate) (default: `http://localhost:8001`)
 

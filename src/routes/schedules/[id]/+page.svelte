@@ -3,12 +3,12 @@
 	import { getSchedule, searchPromisesWithCursor, type Schedule, type Promise } from '$lib/api/client';
 	import Badge from '$lib/components/Badge.svelte';
 
-	const scheduleId = $derived(page.params.id);
+	const scheduleId = $derived(page.params.id!);
 
-	let schedule: Schedule | null = $state(null);
+	let schedule = $state<Schedule | null>(null);
 	let recentRuns: Promise[] = $state([]);
 	let loading = $state(true);
-	let error: string | null = $state(null);
+	let error = $state<string | null>(null);
 
 	async function load() {
 		loading = true;

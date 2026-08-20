@@ -26,7 +26,7 @@
 	}
 
 	let workflows: WorkflowItem[] = $state([]);
-	let error: string | null = $state(null);
+	let error = $state<string | null>(null);
 	let loading = $state(false);
 	let cursor: string | undefined = $state(undefined);
 	let hasMore = $state(false);

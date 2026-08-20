@@ -3,6 +3,7 @@
 		SvelteFlow,
 		Controls,
 		Background,
+		BackgroundVariant,
 		MiniMap,
 		type Node,
 		type Edge
@@ -60,7 +61,7 @@
 		defaultEdgeOptions={{ animated: false }}
 		onnodeclick={handleNodeClick}
 	>
-		<Background variant="dots" gap={20} size={1} color="#1a1d24" />
+		<Background variant={BackgroundVariant.Dots} gap={20} size={1} patternColor="#1a1d24" />
 		{#if interactive}
 			<Controls position="bottom-right" />
 			<MiniMap

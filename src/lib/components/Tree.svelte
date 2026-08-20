@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Badge from './Badge.svelte';
+	import Self from './Tree.svelte';
 	import type { TreeNode } from '$lib/utils/tree';
 	import { promiseRole } from '$lib/utils/tree';
 
@@ -53,7 +54,7 @@
 
 {#if node.expanded}
 	{#each node.children as child}
-		<svelte:self node={child} depth={depth + 1} {onToggle} />
+		<Self node={child} depth={depth + 1} {onToggle} />
 	{/each}
 {/if}
 

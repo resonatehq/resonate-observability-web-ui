@@ -6,7 +6,7 @@
 	let query = $state('');
 	let stateFilter = $state('');
 	let promises: Promise[] = $state([]);
-	let error: string | null = $state(null);
+	let error = $state<string | null>(null);
 	let loading = $state(true);
 
 	async function load() {

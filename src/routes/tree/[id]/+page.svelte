@@ -5,15 +5,15 @@
 	import Tree from '$lib/components/Tree.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 
-	let root: TreeNode | null = $state(null);
-	let error: string | null = $state(null);
+	let root = $state<TreeNode | null>(null);
+	let error = $state<string | null>(null);
 	let loading = $state(true);
 
 	async function loadTree(rootId: string) {
 		loading = true;
 		try {
-			const promises = await fetchTreePromises(rootId, async (tags, cursor) =>
-				searchPromisesWithCursor({ id: '*', tags, cursor, limit: 100 })
+			const promises = await fetchTreePromises(rootId, (params) =>
+				searchPromisesWithCursor({ id: '*', ...params })
 			);
 			root = buildTree(rootId, promises);
 			if (root) {

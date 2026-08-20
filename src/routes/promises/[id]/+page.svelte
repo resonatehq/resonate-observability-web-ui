@@ -4,8 +4,8 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import type { Promise } from '$lib/api/client';
 
-	let promise: Promise | null = $state(null);
-	let error: string | null = $state(null);
+	let promise = $state<Promise | null>(null);
+	let error = $state<string | null>(null);
 	let loading = $state(true);
 
 	$effect(() => {

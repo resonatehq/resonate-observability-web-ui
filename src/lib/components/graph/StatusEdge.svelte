@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { BaseEdge, getSmoothStepPath } from '@xyflow/svelte';
-	import type { EdgeProps } from '@xyflow/svelte';
+	import type { Edge, EdgeProps } from '@xyflow/svelte';
 	import type { GraphEdgeData } from '$lib/utils/tree';
 
 	let {
@@ -13,7 +13,7 @@
 		targetPosition,
 		data,
 		markerEnd
-	}: EdgeProps<GraphEdgeData> = $props();
+	}: EdgeProps<Edge<GraphEdgeData>> = $props();
 
 	function edgeColor(status: string): string {
 		switch (status) {

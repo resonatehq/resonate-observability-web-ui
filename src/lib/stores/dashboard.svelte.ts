@@ -22,7 +22,7 @@ class DashboardStore {
 	recentFailures: Promise[] = $state([]);
 	activePending: Promise[] = $state([]);
 	loading = $state(true);
-	error: string | null = $state(null);
+	error = $state<string | null>(null);
 
 	private pollInterval: ReturnType<typeof setInterval> | null = null;
 

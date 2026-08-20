@@ -16,10 +16,10 @@
 	import TimelineView from '$lib/components/timeline/TimelineView.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 
-	let root: TreeNode | null = $state(null);
-	let error: string | null = $state(null);
+	let root = $state<TreeNode | null>(null);
+	let error = $state<string | null>(null);
 	let loading = $state(true);
-	let selectedPromise: Promise | null = $state(null);
+	let selectedPromise = $state<Promise | null>(null);
 	let direction: 'TB' | 'LR' = $state('TB');
 	let activeTab: 'graph' | 'timeline' | 'list' = $state('graph');
 	let totalSteps = $state(0);

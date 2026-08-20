@@ -68,9 +68,25 @@
 	function handleClick() {
 		onClick?.(bar.id);
 	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			onClick?.(bar.id);
+		}
+	}
 </script>
 
-<g class="timeline-bar" class:pending={isPending} onclick={handleClick} style="cursor: pointer;">
+<g
+	class="timeline-bar"
+	class:pending={isPending}
+	role="button"
+	tabindex="0"
+	aria-label="{bar.label} ({bar.state})"
+	onclick={handleClick}
+	onkeydown={handleKeydown}
+	style="cursor: pointer;"
+>
 	<!-- Bar rect -->
 	<rect
 		{x}
