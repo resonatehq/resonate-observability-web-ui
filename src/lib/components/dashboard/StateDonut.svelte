@@ -26,10 +26,20 @@
 			return [];
 		}
 
+		// `stats.rejected` is the total of all three failure modes, so the
+		// outright-rejected slice is that total minus the two specific kinds —
+		// otherwise cancellations and timeouts are counted twice and the ring
+		// overflows the circle.
 		const data = [
 			{ label: 'Resolved', value: stats.resolved, color: 'var(--green)' },
 			{ label: 'Pending', value: stats.pending, color: 'var(--yellow)' },
-			{ label: 'Rejected', value: stats.rejected, color: 'var(--red)' }
+			{
+				label: 'Rejected',
+				value: stats.rejected - stats.rejectedCanceled - stats.rejectedTimedOut,
+				color: 'var(--red)'
+			},
+			{ label: 'Timed out', value: stats.rejectedTimedOut, color: 'var(--orange)' },
+			{ label: 'Canceled', value: stats.rejectedCanceled, color: 'var(--gray)' }
 		];
 
 		let offset = 0;
@@ -90,7 +100,17 @@
 		</div>
 		<div class="legend-item">
 			<span class="legend-color" style="background: var(--red);"></span>
-			<span class="legend-label">Rejected: {stats.rejected}</span>
+			<span class="legend-label">
+				Rejected: {stats.rejected - stats.rejectedCanceled - stats.rejectedTimedOut}
+			</span>
+		</div>
+		<div class="legend-item">
+			<span class="legend-color" style="background: var(--orange);"></span>
+			<span class="legend-label">Timed out: {stats.rejectedTimedOut}</span>
+		</div>
+		<div class="legend-item">
+			<span class="legend-color" style="background: var(--gray);"></span>
+			<span class="legend-label">Canceled: {stats.rejectedCanceled}</span>
 		</div>
 	</div>
 </div>

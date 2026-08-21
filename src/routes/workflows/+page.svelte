@@ -1,23 +1,39 @@
 <script lang="ts">
-	import { searchPromisesWithCursor, type Promise } from '$lib/api/client';
+	import {
+		searchPromises,
+		ApiError,
+		PROMISE_STATES,
+		type PromiseRecord,
+		type PromiseState
+	} from '$lib/api/client';
 	import {
 		buildTree,
 		fetchTreePromises,
 		isRootInSet,
-		promiseRole,
 		computeSubtreeStatus,
 		computeDuration,
 		formatDuration,
 		type TreeNode,
 		type SubtreeStatus
 	} from '$lib/utils/tree';
+	import { stateLabel, subtreeColor } from '$lib/utils/state';
 	import WorkflowGraph from '$lib/components/graph/WorkflowGraph.svelte';
 	import Badge from '$lib/components/Badge.svelte';
+	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
 
 	interface WorkflowItem {
-		promise: Promise;
+		promise: PromiseRecord;
 		tree: TreeNode | null;
 		loading: boolean;
+		/**
+		 * Identifies the version of the root promise the tree was built from.
+		 * The tree is refetched when this no longer matches the root, which is
+		 * what stops an expanded card graph freezing at its first render while
+		 * the badge above it keeps updating.
+		 */
+		treeStamp: string | null;
+		/** Set when a tree fetch failed, so the 5s refresh does not retry forever. */
+		treeError: boolean;
 		totalSteps: number;
 		completedSteps: number;
 		rejectedSteps: number;
@@ -25,49 +41,43 @@
 		subtreeStatus: SubtreeStatus;
 	}
 
+	const PAGE_SIZE = 20;
+	/** Cap on concurrent tree fetches, so one page of cards is not one burst. */
+	const TREE_CONCURRENCY = 4;
+
 	let workflows: WorkflowItem[] = $state([]);
-	let error = $state<string | null>(null);
+	let error = $state<ApiError | null>(null);
 	let loading = $state(false);
 	let cursor: string | undefined = $state(undefined);
 	let hasMore = $state(false);
-	let pagesLoaded = $state(1); // Track how many pages we've loaded
+	let pagesLoaded = $state(1);
 
-	// Filters
-	let stateFilter = $state('');
-	let sortMode = $state<'created-desc' | 'created-asc'>('created-desc');
+	let stateFilter = $state<PromiseState | ''>('');
+
+	/** A root promise changes identity for tree purposes when it settles. */
+	const stampOf = (p: PromiseRecord) => `${p.state}:${p.settledAt ?? ''}`;
 
 	async function loadWorkflows(append = false, isRefresh = false) {
-		// Only show loading spinner on initial load, not on refresh
-		if (!isRefresh) {
-			loading = true;
-		}
+		if (!isRefresh) loading = true;
 		try {
-			// On refresh, re-fetch all pages that were previously loaded
 			const pagesToFetch = isRefresh ? pagesLoaded : 1;
-			let allRoots: Promise[] = [];
+			const allRoots: PromiseRecord[] = [];
 			let tempCursor: string | undefined = append ? cursor : undefined;
 			let lastCursor: string | undefined;
 
 			for (let i = 0; i < pagesToFetch; i++) {
-				const result = await searchPromisesWithCursor({
-					id: '*',
+				const result = await searchPromises({
 					state: stateFilter || undefined,
-					limit: 20,
-					cursor: tempCursor,
-					sortId: sortMode === 'created-desc' ? -1 : 1
+					limit: PAGE_SIZE,
+					cursor: tempCursor
 				});
-
 				allRoots.push(...result.promises);
 				lastCursor = result.cursor;
 				tempCursor = result.cursor;
-
-				// Break if no more pages
 				if (!result.cursor) break;
 			}
 
 			const roots = allRoots.filter((p) => isRootInSet(p, allRoots));
-
-			// On refresh, preserve existing tree data and expanded state
 			const existingWorkflows = new Map(workflows.map((w) => [w.promise.id, w]));
 
 			const newItems: WorkflowItem[] = roots.map((p) => {
@@ -76,55 +86,79 @@
 					promise: p,
 					tree: existing?.tree ?? null,
 					loading: existing?.loading ?? false,
+					treeStamp: existing?.treeStamp ?? null,
+					treeError: existing?.treeError ?? false,
 					totalSteps: existing?.totalSteps ?? 0,
 					completedSteps: existing?.completedSteps ?? 0,
 					rejectedSteps: existing?.rejectedSteps ?? 0,
 					pendingSteps: existing?.pendingSteps ?? 0,
-					subtreeStatus: existing?.subtreeStatus ?? ('pending' as SubtreeStatus)
+					subtreeStatus: existing?.subtreeStatus ?? 'pending'
 				};
 			});
 
 			if (append) {
 				workflows = [...workflows, ...newItems];
-				pagesLoaded += 1; // Increment pages loaded
+				pagesLoaded += 1;
 			} else {
 				workflows = newItems;
-				if (!isRefresh) {
-					pagesLoaded = 1; // Reset on filter change
-				}
+				if (!isRefresh) pagesLoaded = 1;
 			}
 
 			cursor = lastCursor;
 			hasMore = !!lastCursor;
 			error = null;
 
-			// Lazy-load trees for visible workflows
-			for (const item of workflows) {
-				if (!item.tree && !item.loading) {
-					loadWorkflowTree(item);
-				}
-			}
+			void refreshTrees();
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
 		} finally {
 			loading = false;
 		}
 	}
 
+	/**
+	 * Fetches the trees that are actually out of date.
+	 *
+	 * Three things keep this from being the every-card-every-five-seconds
+	 * fan-out it used to be: a stamp so unchanged roots are skipped, a sticky
+	 * error flag so a tree that cannot be built is not retried forever, and a
+	 * concurrency cap so a full page does not open twenty paginated fetches at
+	 * once. A pending root still refetches on every tick — that one is the
+	 * point of the page.
+	 */
+	async function refreshTrees() {
+		const stale = workflows.filter(
+			(item) =>
+				!item.loading && !item.treeError && item.treeStamp !== stampOf(item.promise)
+		);
+
+		for (let i = 0; i < stale.length; i += TREE_CONCURRENCY) {
+			await Promise.all(stale.slice(i, i + TREE_CONCURRENCY).map(loadWorkflowTree));
+		}
+	}
+
 	async function loadWorkflowTree(item: WorkflowItem) {
 		item.loading = true;
+		const stamp = stampOf(item.promise);
 		try {
-			const promises = await fetchTreePromises(item.promise.id, async (params) =>
-				searchPromisesWithCursor({ ...params, id: params.id || '*' })
+			const promises = await fetchTreePromises(item.promise.id, (params) =>
+				searchPromises(params)
 			);
-			item.tree = buildTree(item.promise.id, promises);
-			if (item.tree) {
-				item.tree.expanded = true;
-				item.subtreeStatus = computeSubtreeStatus(item.tree);
+			const tree = buildTree(item.promise.id, promises);
+			if (tree) {
+				// Preserve whether the operator had this card expanded.
+				tree.expanded = item.tree?.expanded ?? true;
+				item.tree = tree;
+				item.subtreeStatus = computeSubtreeStatus(tree);
 				countSteps(item);
+				item.treeStamp = stamp;
+			} else {
+				item.treeError = true;
 			}
 		} catch {
-			// Silently fail for individual tree loads
+			// One card failing to load its graph must not take down the page,
+			// but it also must not retry on every refresh.
+			item.treeError = true;
 		} finally {
 			item.loading = false;
 		}
@@ -138,8 +172,10 @@
 		let pending = 0;
 		function walk(n: TreeNode) {
 			total++;
-			if (n.promise.state === 'RESOLVED') completed++;
-			else if (n.promise.state === 'PENDING') pending++;
+			if (n.promise.state === 'resolved') completed++;
+			else if (n.promise.state === 'pending') pending++;
+			// Rejected, canceled and timed-out all count as "not done" here.
+			// The card shows a total; the graph shows which kind.
 			else rejected++;
 			for (const child of n.children) walk(child);
 		}
@@ -155,20 +191,9 @@
 		loadWorkflows(false);
 	}
 
-	function statusBarColor(status: SubtreeStatus): string {
-		switch (status) {
-			case 'resolved':
-				return 'var(--green)';
-			case 'pending':
-				return 'var(--yellow)';
-			case 'rejected':
-				return 'var(--red)';
-		}
-	}
-
 	$effect(() => {
-		loadWorkflows(false, false); // Initial load
-		const interval = setInterval(() => loadWorkflows(false, true), 5000); // Background refresh
+		loadWorkflows(false, false);
+		const interval = setInterval(() => loadWorkflows(false, true), 5000);
 		return () => clearInterval(interval);
 	});
 </script>
@@ -176,21 +201,27 @@
 <div class="page-header">
 	<h1>Workflows</h1>
 	<div class="header-controls">
+		<!--
+			All five states are listed because the server's filter is an exact
+			match: asking for `rejected` does not return canceled or timed-out
+			promises. A three-option "Rejected" would silently hide two thirds
+			of the failures.
+		-->
 		<select class="filter-select" bind:value={stateFilter} onchange={changeFilter}>
-			<option value="">All States</option>
-			<option value="pending">Pending</option>
-			<option value="resolved">Resolved</option>
-			<option value="rejected">Rejected</option>
-		</select>
-		<select class="filter-select" bind:value={sortMode} onchange={changeFilter}>
-			<option value="created-desc">Newest First</option>
-			<option value="created-asc">Oldest First</option>
+			<option value="">All states</option>
+			{#each PROMISE_STATES as state}
+				<option value={state}>{stateLabel(state)}</option>
+			{/each}
 		</select>
 	</div>
 </div>
 
+<p class="order-note muted">
+	Ordered by promise ID — the server offers no sort or time range on search.
+</p>
+
 {#if error}
-	<div class="alert alert-error">{error}</div>
+	<ErrorPanel {error} />
 {/if}
 
 {#if loading && workflows.length === 0}
@@ -205,9 +236,7 @@
 					<Badge state={item.promise.state} />
 					<span class="card-id mono">{item.promise.id}</span>
 					<span class="card-time muted">
-						{#if item.promise.createdOn}
-							{new Date(item.promise.createdOn).toLocaleString()}
-						{/if}
+						{new Date(item.promise.createdAt).toLocaleString()}
 					</span>
 				</div>
 
@@ -217,6 +246,12 @@
 					</div>
 				{:else if item.loading}
 					<div class="card-graph-loading">Loading graph...</div>
+				{:else if item.treeError}
+					<!-- Honest about why: a tree is only discoverable through the
+					     resonate:origin tag, and not every promise carries one. -->
+					<div class="card-graph-loading">
+						No graph — this workflow has no <code>resonate:origin</code> tag.
+					</div>
 				{:else}
 					<div class="card-graph-loading">No tree data</div>
 				{/if}
@@ -241,7 +276,7 @@
 
 				<div
 					class="status-bar"
-					style="background: {statusBarColor(item.subtreeStatus)}"
+					style="background: {subtreeColor(item.subtreeStatus)}"
 				></div>
 			</a>
 		{/each}
@@ -257,6 +292,11 @@
 {/if}
 
 <style>
+	.order-note {
+		margin: -0.5rem 0 1rem;
+		font-size: 0.8125rem;
+	}
+
 	.page-header {
 		display: flex;
 		align-items: center;

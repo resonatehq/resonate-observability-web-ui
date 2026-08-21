@@ -1,37 +1,51 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { searchPromises } from '$lib/api/client';
+	import {
+		searchPromises,
+		ApiError,
+		PROMISE_STATES,
+		type PromiseRecord,
+		type PromiseState
+	} from '$lib/api/client';
 	import PromiseTable from '$lib/components/PromiseTable.svelte';
-	import type { Promise } from '$lib/api/client';
+	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import { stateLabel } from '$lib/utils/state';
 
-	let query = $state('');
-	let stateFilter = $state('');
-	let promises: Promise[] = $state([]);
-	let error = $state<string | null>(null);
+	const PAGE_SIZE = 50;
+
+	let stateFilter = $state<PromiseState | ''>('');
+	let promises: PromiseRecord[] = $state([]);
+	let error = $state<ApiError | null>(null);
 	let loading = $state(true);
+	let cursor = $state<string | undefined>(undefined);
+	let hasMore = $state(false);
 
-	async function load() {
+	async function load(append = false) {
 		loading = true;
 		try {
-			promises = await searchPromises(query || '*', stateFilter, 50);
+			const result = await searchPromises({
+				state: stateFilter || undefined,
+				limit: PAGE_SIZE,
+				cursor: append ? cursor : undefined
+			});
+			promises = append ? [...promises, ...result.promises] : result.promises;
+			cursor = result.cursor;
+			hasMore = !!result.cursor;
 			error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
 		} finally {
 			loading = false;
 		}
 	}
 
-	function handleSearch(e: SubmitEvent) {
-		e.preventDefault();
-		load();
+	function changeFilter() {
+		cursor = undefined;
+		load(false);
 	}
 
-	// Load once on mount only. Reading `query`/`stateFilter` inside a tracked
-	// effect made this fire a request per keystroke and left the Search button
-	// doing nothing; searches are now driven by submit and the state <select>.
 	$effect(() => {
-		untrack(() => load());
+		untrack(() => load(false));
 	});
 </script>
 
@@ -39,28 +53,69 @@
 	<h1>Promises</h1>
 </div>
 
-<form class="search-bar" onsubmit={handleSearch}>
-	<input
-		type="text"
-		class="search-input"
-		placeholder="Search promises (wildcards: *)"
-		bind:value={query}
-	/>
-	<select class="search-select" bind:value={stateFilter} onchange={() => load()}>
-		<option value="">All States</option>
-		<option value="pending">Pending</option>
-		<option value="resolved">Resolved</option>
-		<option value="rejected">Rejected</option>
+<!--
+	There is no search box here on purpose.
+
+	`promise.search` takes only {state, tags, limit, cursor} — it has no id
+	filter and no sort, and an unrecognised `id` parameter is silently ignored
+	rather than rejected. The box that used to sit here therefore accepted a
+	query, sent it, and returned every promise on the server as though it had
+	matched. Filtering by state and paging through is less capable and is not
+	a lie; the id filter is filed as a server ask.
+-->
+<div class="filter-bar">
+	<label class="filter-label" for="state-filter">State</label>
+	<select
+		id="state-filter"
+		class="search-select"
+		bind:value={stateFilter}
+		onchange={changeFilter}
+	>
+		<option value="">All states</option>
+		{#each PROMISE_STATES as state}
+			<option value={state}>{stateLabel(state)}</option>
+		{/each}
 	</select>
-	<button type="submit" class="btn btn-primary">Search</button>
-</form>
+	<span class="muted filter-note">Ordered by ID — the server offers no sort.</span>
+</div>
 
 {#if error}
-	<div class="alert alert-error">{error}</div>
+	<ErrorPanel {error} while="loading promises" />
 {/if}
 
-{#if loading}
+{#if loading && promises.length === 0}
 	<div class="loading">Loading...</div>
 {:else}
 	<PromiseTable {promises} />
+	{#if hasMore}
+		<div class="load-more">
+			<button class="btn" onclick={() => load(true)} disabled={loading}>
+				{loading ? 'Loading...' : 'Load more'}
+			</button>
+		</div>
+	{/if}
 {/if}
+
+<style>
+	.filter-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.filter-label {
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+
+	.filter-note {
+		font-size: 0.8125rem;
+	}
+
+	.load-more {
+		display: flex;
+		justify-content: center;
+		margin-top: 1.5rem;
+	}
+</style>

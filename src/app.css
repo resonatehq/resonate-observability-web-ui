@@ -22,6 +22,10 @@
 	--yellow-bg: rgba(234, 179, 8, 0.1);
 	--red: #ef4444;
 	--red-bg: rgba(239, 68, 68, 0.1);
+	/* Timed-out sits between failure and neutral: it is a bad outcome, but a
+	   different one from an outright rejection, and it must not read as red. */
+	--orange: #f97316;
+	--orange-bg: rgba(249, 115, 22, 0.12);
 	--gray: #6b7280;
 
 	--sidebar-width: 240px;
@@ -51,6 +55,8 @@
 	--yellow-bg: rgba(202, 138, 4, 0.1);
 	--red: #dc2626;
 	--red-bg: rgba(220, 38, 38, 0.1);
+	--orange: #ea580c;
+	--orange-bg: rgba(234, 88, 12, 0.12);
 	--gray: #6b7280;
 
 	/* Graph visualization for light mode */
@@ -157,6 +163,11 @@ a:hover {
 .badge-red {
 	color: var(--red);
 	background: var(--red-bg);
+}
+
+.badge-orange {
+	color: var(--orange);
+	background: var(--orange-bg);
 }
 
 .badge-gray {

@@ -10,6 +10,7 @@
 	} from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import PromiseNode from './PromiseNode.svelte';
+	import { subtreeColorHex, toSubtreeStatus } from '$lib/utils/state';
 	import StatusEdge from './StatusEdge.svelte';
 	import type { TreeNode, GraphNodeData, GraphEdgeData } from '$lib/utils/tree';
 	import { treeToGraphData } from '$lib/utils/tree';
@@ -69,18 +70,9 @@
 				zoomable
 				nodeColor={(node) => {
 					const data = node.data as GraphNodeData;
-					switch (data.promise.state) {
-						case 'RESOLVED':
-							return '#22c55e';
-						case 'PENDING':
-							return '#eab308';
-						case 'REJECTED':
-						case 'REJECTED_CANCELED':
-						case 'REJECTED_TIMEDOUT':
-							return '#ef4444';
-						default:
-							return '#6b7280';
-					}
+					// Literal hex: the minimap is canvas-painted and cannot
+					// resolve CSS custom properties.
+					return subtreeColorHex(toSubtreeStatus(data.promise.state));
 				}}
 			/>
 		{/if}

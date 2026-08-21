@@ -2,6 +2,7 @@
 	import { BaseEdge, getSmoothStepPath } from '@xyflow/svelte';
 	import type { Edge, EdgeProps } from '@xyflow/svelte';
 	import type { GraphEdgeData } from '$lib/utils/tree';
+	import { subtreeColor } from '$lib/utils/state';
 
 	let {
 		id,
@@ -15,19 +16,6 @@
 		markerEnd
 	}: EdgeProps<Edge<GraphEdgeData>> = $props();
 
-	function edgeColor(status: string): string {
-		switch (status) {
-			case 'resolved':
-				return 'var(--green)';
-			case 'pending':
-				return 'var(--yellow)';
-			case 'rejected':
-				return 'var(--red)';
-			default:
-				return 'var(--edge-default, #3a3d4a)';
-		}
-	}
-
 	let pathResult = $derived(
 		getSmoothStepPath({
 			sourceX,
@@ -40,7 +28,9 @@
 		})
 	);
 
-	let color = $derived(edgeColor(data?.subtreeStatus ?? ''));
+	let color = $derived(
+		data?.subtreeStatus ? subtreeColor(data.subtreeStatus) : 'var(--edge-default, #3a3d4a)'
+	);
 </script>
 
 <BaseEdge {id} path={pathResult[0]} style="stroke: {color}; stroke-width: 2;" {markerEnd} />

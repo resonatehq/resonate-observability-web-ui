@@ -1,33 +1,21 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getSchedule, searchPromisesWithCursor, type Schedule, type Promise } from '$lib/api/client';
-	import Badge from '$lib/components/Badge.svelte';
+	import { getSchedule, ApiError, decodeValueAsJson, type ScheduleRecord } from '$lib/api/client';
+	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
 
 	const scheduleId = $derived(page.params.id!);
 
-	let schedule = $state<Schedule | null>(null);
-	let recentRuns: Promise[] = $state([]);
+	let schedule = $state<ScheduleRecord | null>(null);
 	let loading = $state(true);
-	let error = $state<string | null>(null);
+	let error = $state<ApiError | null>(null);
 
 	async function load() {
 		loading = true;
-		error = null;
 		try {
-			// Fetch schedule details
 			schedule = await getSchedule(scheduleId);
-
-			// Fetch recent runs (promises triggered by this schedule)
-			if (schedule) {
-				const result = await searchPromisesWithCursor({
-					id: `${schedule.promiseId}*`,
-					limit: 50,
-					sortId: -1 // Most recent first
-				});
-				recentRuns = result.promises;
-			}
+			error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
 		} finally {
 			loading = false;
 		}
@@ -40,21 +28,8 @@
 	});
 
 	function formatTime(timestamp: number | undefined): string {
-		if (!timestamp) return 'Never';
+		if (timestamp == null) return 'Never';
 		return new Date(timestamp).toLocaleString();
-	}
-
-	function getRunDuration(run: Promise): string {
-		if (!run.createdOn) return '—';
-		if (run.state === 'PENDING') {
-			const elapsed = Date.now() - run.createdOn;
-			return formatDuration(elapsed) + ' (running)';
-		}
-		if (run.completedOn) {
-			const duration = run.completedOn - run.createdOn;
-			return formatDuration(duration);
-		}
-		return '—';
 	}
 
 	function formatDuration(ms: number): string {
@@ -63,11 +38,13 @@
 		if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)}m`;
 		return `${(ms / 3_600_000).toFixed(1)}h`;
 	}
+
+	const paramJson = $derived(schedule ? decodeValueAsJson(schedule.promiseParam) : null);
 </script>
 
 <div class="schedule-detail">
 	{#if error}
-		<div class="alert alert-error">{error}</div>
+		<ErrorPanel {error} while="loading this schedule" />
 	{/if}
 
 	{#if loading && !schedule}
@@ -76,9 +53,6 @@
 		<div class="page-header">
 			<div>
 				<h1>{schedule.id}</h1>
-				{#if schedule.description}
-					<p class="schedule-description">{schedule.description}</p>
-				{/if}
 			</div>
 			<a href="/schedules" class="btn">Back to Schedules</a>
 		</div>
@@ -90,73 +64,82 @@
 			</div>
 
 			<div class="info-card">
-				<div class="info-label">Promise ID Pattern</div>
+				<div class="info-label">Promise ID Template</div>
 				<div class="info-value mono">{schedule.promiseId}</div>
 			</div>
 
 			<div class="info-card">
+				<div class="info-label">Promise Timeout</div>
+				<div class="info-value mono">{formatDuration(schedule.promiseTimeout)}</div>
+			</div>
+
+			<div class="info-card">
 				<div class="info-label">Last Run</div>
-				<div class="info-value mono">{formatTime(schedule.lastRunTime)}</div>
+				<div class="info-value mono">{formatTime(schedule.lastRunAt)}</div>
 			</div>
 
 			<div class="info-card">
 				<div class="info-label">Next Run</div>
-				<div class="info-value mono">{formatTime(schedule.nextRunTime)}</div>
+				<div class="info-value mono">{formatTime(schedule.nextRunAt)}</div>
 			</div>
 
 			<div class="info-card">
 				<div class="info-label">Created</div>
-				<div class="info-value mono">{formatTime(schedule.createdOn)}</div>
+				<div class="info-value mono">{formatTime(schedule.createdAt)}</div>
 			</div>
 		</div>
 
-		{#if schedule.tags && Object.keys(schedule.tags).length > 0}
+		{#if Object.keys(schedule.promiseTags).length > 0}
 			<div class="tags-section">
-				<h2 class="section-title">Tags</h2>
+				<h2 class="section-title">Promise Tags</h2>
 				<div class="tags-list">
-					{#each Object.entries(schedule.tags) as [k, v]}
+					{#each Object.entries(schedule.promiseTags) as [k, v]}
 						<span class="tag">{k}={v}</span>
 					{/each}
 				</div>
 			</div>
 		{/if}
 
-		<div class="recent-runs-section">
-			<h2 class="section-title">Recent Runs ({recentRuns.length})</h2>
+		{#if paramJson}
+			<div class="tags-section">
+				<h2 class="section-title">Promise Parameter</h2>
+				<pre class="param-block mono">{paramJson}</pre>
+			</div>
+		{/if}
 
-			{#if recentRuns.length === 0}
-				<div class="empty-state">No runs found for this schedule.</div>
-			{:else}
-				<table class="data-table">
-					<thead>
-						<tr>
-							<th>State</th>
-							<th>Promise ID</th>
-							<th>Created</th>
-							<th>Completed</th>
-							<th>Duration</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each recentRuns as run}
-							<tr>
-								<td><Badge state={run.state} /></td>
-								<td>
-									<a href="/workflows/{run.id}" class="mono promise-link">{run.id}</a>
-								</td>
-								<td class="mono time">{formatTime(run.createdOn)}</td>
-								<td class="mono time">{formatTime(run.completedOn)}</td>
-								<td class="mono duration">{getRunDuration(run)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
+		<!--
+			The "Recent Runs" table that used to sit here has been removed rather
+			than left broken. Finding the promises a schedule produced requires a
+			prefix match on the promise-ID template, and `promise.search` has no
+			id filter — the old query was accepted and ignored, so the table was
+			showing the first 50 promises on the server and calling them runs of
+			this schedule. `lastRunAt` above is the honest version of that
+			information until the server grows an id filter.
+		-->
+		<div class="runs-note">
+			<h2 class="section-title">Recent Runs</h2>
+			<p class="muted">
+				Not available. Listing a schedule&rsquo;s runs needs a prefix search on the
+				promise-ID template, which the server does not currently support.
+			</p>
 		</div>
 	{/if}
 </div>
 
 <style>
+	.param-block {
+		background: var(--bg-surface);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 0.75rem;
+		overflow-x: auto;
+		font-size: 0.8125rem;
+	}
+
+	.runs-note {
+		margin-top: 2rem;
+	}
+
 	.schedule-detail {
 		padding: 1.5rem;
 	}
@@ -174,10 +157,6 @@
 		margin-bottom: 0.5rem;
 	}
 
-	.schedule-description {
-		color: var(--text-muted);
-		font-size: 0.875rem;
-	}
 
 	.schedule-info {
 		display: grid;
@@ -223,33 +202,9 @@
 		gap: 0.5rem;
 	}
 
-	.recent-runs-section {
-		margin-bottom: 2rem;
-	}
 
-	.promise-link {
-		color: var(--secondary);
-		text-decoration: none;
-		font-weight: 500;
-		transition: color 0.2s;
-	}
 
-	.promise-link:hover {
-		text-decoration: underline;
-	}
 
-	.time {
-		font-size: 0.8125rem;
-		color: var(--text-muted);
-	}
 
-	.duration {
-		font-size: 0.8125rem;
-	}
 
-	.empty-state {
-		padding: 3rem;
-		text-align: center;
-		color: var(--text-muted);
-	}
 </style>

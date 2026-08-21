@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getPromise } from '$lib/api/client';
+	import { getPromise, decodeValue, ApiError, type PromiseValue } from '$lib/api/client';
+	import { formatDuration } from '$lib/utils/tree';
 	import Badge from '$lib/components/Badge.svelte';
-	import type { Promise } from '$lib/api/client';
+	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import type { PromiseRecord } from '$lib/api/client';
 
-	let promise = $state<Promise | null>(null);
-	let error = $state<string | null>(null);
+	let promise = $state<PromiseRecord | null>(null);
+	let error = $state<ApiError | null>(null);
 	let loading = $state(true);
 
 	$effect(() => {
@@ -17,18 +19,28 @@
 				error = null;
 			})
 			.catch((e) => {
-				error = e instanceof Error ? e.message : String(e);
+				error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
 			})
 			.finally(() => {
 				loading = false;
 			});
 	});
 
-	function formatData(data: string | undefined): { formatted: string; hasTarget: boolean; target?: string } {
-		if (!data) return { formatted: '', hasTarget: false };
+	/**
+	 * Payloads arrive base64-encoded. This page used to hand the raw encoded
+	 * string straight to `JSON.parse`, which always threw, so it fell through
+	 * to rendering the base64 at the user — while the workflow view, using its
+	 * own copy of this logic, decoded correctly. Both now go through the one
+	 * decoder in the API client.
+	 */
+	function formatData(
+		value: PromiseValue | undefined
+	): { formatted: string; hasTarget: boolean; target?: string } {
+		const decoded = decodeValue(value);
+		if (decoded === null) return { formatted: '', hasTarget: false };
 
 		try {
-			const parsed = JSON.parse(data);
+			const parsed = JSON.parse(decoded);
 			if (parsed && typeof parsed === 'object' && 'target' in parsed) {
 				return {
 					formatted: JSON.stringify(parsed, null, 2),
@@ -36,11 +48,14 @@
 					target: parsed.target
 				};
 			}
+			// Still JSON, just without a target — pretty-print it rather than
+			// showing one long line.
+			return { formatted: JSON.stringify(parsed, null, 2), hasTarget: false };
 		} catch {
-			// Not JSON, return as-is
+			// Decoded fine but is not JSON; show the decoded text.
 		}
 
-		return { formatted: data, hasTarget: false };
+		return { formatted: decoded, hasTarget: false };
 	}
 </script>
 
@@ -50,7 +65,7 @@
 </div>
 
 {#if error}
-	<div class="alert alert-error">{error}</div>
+	<ErrorPanel {error} while="loading this promise" />
 {/if}
 
 {#if loading}
@@ -65,13 +80,15 @@
 		<div class="detail-card">
 			<h3>Timing</h3>
 			<dl>
-				<dt>Timeout</dt>
-				<dd class="mono">{promise.timeout}</dd>
 				<dt>Created</dt>
-				<dd class="mono">{promise.createdOn ?? '—'}</dd>
-				{#if promise.completedOn}
-					<dt>Completed</dt>
-					<dd class="mono">{promise.completedOn}</dd>
+				<dd class="mono">{new Date(promise.createdAt).toLocaleString()}</dd>
+				<dt>Times out</dt>
+				<dd class="mono">{new Date(promise.timeoutAt).toLocaleString()}</dd>
+				{#if promise.settledAt != null}
+					<dt>Settled</dt>
+					<dd class="mono">{new Date(promise.settledAt).toLocaleString()}</dd>
+					<dt>Duration</dt>
+					<dd class="mono">{formatDuration(promise.settledAt - promise.createdAt)}</dd>
 				{/if}
 			</dl>
 		</div>
@@ -100,7 +117,7 @@
 					</dl>
 				{/if}
 				{#if promise.param.data}
-					{@const formatted = formatData(promise.param.data)}
+					{@const formatted = formatData(promise.param)}
 					{#if formatted.hasTarget && formatted.target}
 						<h4>Target</h4>
 						<div class="target-value mono">target: {formatted.target}</div>
@@ -124,7 +141,7 @@
 					</dl>
 				{/if}
 				{#if promise.value.data}
-					{@const formatted = formatData(promise.value.data)}
+					{@const formatted = formatData(promise.value)}
 					{#if formatted.hasTarget && formatted.target}
 						<h4>Target</h4>
 						<div class="target-value mono">target: {formatted.target}</div>

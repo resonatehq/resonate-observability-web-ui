@@ -3,6 +3,7 @@
 	import type { NodeProps } from '@xyflow/svelte';
 	import type { GraphNodeData } from '$lib/utils/tree';
 	import { formatDuration } from '$lib/utils/tree';
+	import { stateColor, stateLabel, subtreeColor } from '$lib/utils/state';
 
 	interface Props extends NodeProps {
 		data: GraphNodeData;
@@ -10,47 +11,8 @@
 
 	let { data, id }: Props = $props();
 
-	function stateColor(state: string): string {
-		switch (state) {
-			case 'RESOLVED':
-				return 'var(--green)';
-			case 'PENDING':
-				return 'var(--yellow)';
-			case 'REJECTED':
-			case 'REJECTED_CANCELED':
-			case 'REJECTED_TIMEDOUT':
-				return 'var(--red)';
-			default:
-				return 'var(--muted)';
-		}
-	}
-
-	function subtreeColor(status: string): string {
-		switch (status) {
-			case 'resolved':
-				return 'var(--green)';
-			case 'pending':
-				return 'var(--yellow)';
-			case 'rejected':
-				return 'var(--red)';
-			default:
-				return 'var(--muted)';
-		}
-	}
-
-	function stateLabel(state: string): string {
-		switch (state) {
-			case 'REJECTED_CANCELED':
-				return 'CANCELED';
-			case 'REJECTED_TIMEDOUT':
-				return 'TIMEDOUT';
-			default:
-				return state;
-		}
-	}
-
 	let borderColor = $derived(stateColor(data.promise.state));
-	let isPending = $derived(data.promise.state === 'PENDING');
+	let isPending = $derived(data.promise.state === 'pending');
 </script>
 
 <div class="promise-node" style="border-left-color: {borderColor}" class:pending={isPending}>

@@ -1,4 +1,4 @@
-import type { Promise } from '$lib/api/client';
+import type { PromiseRecord } from '$lib/api/client';
 
 export interface PromiseStats {
 	total: number;
@@ -16,7 +16,7 @@ export interface PromiseStats {
 /**
  * Computes aggregate statistics from a list of promises.
  */
-export function computeStats(promises: Promise[]): PromiseStats {
+export function computeStats(promises: PromiseRecord[]): PromiseStats {
 	const stats: PromiseStats = {
 		total: promises.length,
 		pending: 0,
@@ -34,24 +34,26 @@ export function computeStats(promises: Promise[]): PromiseStats {
 
 	for (const p of promises) {
 		switch (p.state) {
-			case 'PENDING':
+			case 'pending':
 				stats.pending++;
 				break;
-			case 'RESOLVED':
+			case 'resolved':
 				stats.resolved++;
-				// Count resolved in last hour for throughput
-				if (p.completedOn && p.completedOn >= oneHourAgo) {
+				if (p.settledAt != null && p.settledAt >= oneHourAgo) {
 					resolvedLastHour++;
 				}
 				break;
-			case 'REJECTED':
+			case 'rejected':
 				stats.rejected++;
 				break;
-			case 'REJECTED_CANCELED':
+			// Canceled and timed-out promises count toward the failure total
+			// *and* keep their own tally, so the dashboard can say which kind
+			// of failure it is rather than just how many there were.
+			case 'rejected_canceled':
 				stats.rejected++;
 				stats.rejectedCanceled++;
 				break;
-			case 'REJECTED_TIMEDOUT':
+			case 'rejected_timedout':
 				stats.rejected++;
 				stats.rejectedTimedOut++;
 				break;
@@ -73,32 +75,30 @@ export function computeStats(promises: Promise[]): PromiseStats {
 /**
  * Returns promises that failed (rejected states).
  */
-export function getRecentFailures(promises: Promise[], limit: number = 10): Promise[] {
+export function getRecentFailures(
+	promises: PromiseRecord[],
+	limit: number = 10
+): PromiseRecord[] {
 	return promises
 		.filter(
 			(p) =>
-				p.state === 'REJECTED' ||
-				p.state === 'REJECTED_CANCELED' ||
-				p.state === 'REJECTED_TIMEDOUT'
+				p.state === 'rejected' ||
+				p.state === 'rejected_canceled' ||
+				p.state === 'rejected_timedout'
 		)
-		.sort((a, b) => {
-			const timeA = a.completedOn ?? a.createdOn ?? 0;
-			const timeB = b.completedOn ?? b.createdOn ?? 0;
-			return timeB - timeA; // Descending
-		})
+		.sort((a, b) => (b.settledAt ?? b.createdAt) - (a.settledAt ?? a.createdAt))
 		.slice(0, limit);
 }
 
 /**
  * Returns promises that are currently pending (active workflows).
  */
-export function getActivePending(promises: Promise[], limit: number = 5): Promise[] {
+export function getActivePending(
+	promises: PromiseRecord[],
+	limit: number = 5
+): PromiseRecord[] {
 	return promises
-		.filter((p) => p.state === 'PENDING')
-		.sort((a, b) => {
-			const timeA = a.createdOn ?? 0;
-			const timeB = b.createdOn ?? 0;
-			return timeA - timeB; // Oldest first
-		})
+		.filter((p) => p.state === 'pending')
+		.sort((a, b) => a.createdAt - b.createdAt) // Oldest first — most stuck
 		.slice(0, limit);
 }

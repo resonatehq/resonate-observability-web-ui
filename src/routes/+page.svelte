@@ -4,6 +4,7 @@
 	import ThroughputChart from '$lib/components/dashboard/ThroughputChart.svelte';
 	import ActiveWorkflows from '$lib/components/dashboard/ActiveWorkflows.svelte';
 	import ErrorList from '$lib/components/dashboard/ErrorList.svelte';
+	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
 
 	$effect(() => {
 		dashboardStore.startPolling(5000);
@@ -20,13 +21,23 @@
 		<h1>Dashboard</h1>
 		<div class="header-info">
 			{#if !loading}
-				<span class="last-updated muted">Auto-refreshing every 5s</span>
+				<!--
+					These figures are counted client-side over one page of search
+					results, because /metrics exposes API traffic rather than promise
+					counts by state. Saying so is the difference between a sample and
+					a claimed total.
+				-->
+				<span class="last-updated muted">
+					Auto-refreshing every 5s · sampled from {dashboardStore.sampleSize}{dashboardStore.sampleTruncated
+						? '+'
+						: ''} promises
+				</span>
 			{/if}
 		</div>
 	</div>
 
 	{#if error}
-		<div class="alert alert-error">{error}</div>
+		<ErrorPanel {error} while="loading the dashboard" />
 	{/if}
 
 	{#if loading && dashboardStore.promises.length === 0}
@@ -46,11 +57,17 @@
 				<div class="metric-trend resolved">Completed successfully</div>
 			</a>
 
+			<!--
+				"Failed", not "Rejected": this total covers all three failure
+				states, and a card labelled Rejected linking to a `state=rejected`
+				filter that returns only one of them reads as a bug.
+			-->
 			<a href="/workflows?state=rejected" class="metric-card">
-				<div class="metric-label">Rejected</div>
+				<div class="metric-label">Failed</div>
 				<div class="metric-value">{stats.rejected}</div>
 				<div class="metric-trend rejected">
-					{stats.errorRate.toFixed(1)}% error rate
+					{stats.errorRate.toFixed(1)}% error rate{#if stats.rejectedTimedOut > 0 || stats.rejectedCanceled > 0}
+						· {stats.rejectedTimedOut} timed out, {stats.rejectedCanceled} canceled{/if}
 				</div>
 			</a>
 

@@ -1,17 +1,30 @@
-import type { Promise } from '$lib/api/client';
+import type { PromiseRecord, PromiseState } from '$lib/api/client';
 import type { Node, Edge } from '@xyflow/svelte';
 import dagre from '@dagrejs/dagre';
 
 export interface TreeNode {
-	promise: Promise;
+	promise: PromiseRecord;
 	children: TreeNode[];
 	expanded: boolean;
+	/**
+	 * True when the promise was not in the search results and this node is a
+	 * placeholder. Callers must not present its `state` as fact.
+	 */
+	missing?: boolean;
 }
 
-export type SubtreeStatus = 'resolved' | 'pending' | 'rejected';
+/**
+ * Aggregate status of a node and everything under it.
+ *
+ * This mirrors the server's five states rather than collapsing them: a
+ * cancellation is somebody's decision, a timeout is a missed deadline, and a
+ * rejection is a failure. An operator triaging a stuck system needs to tell
+ * those apart at a glance, so the graph colours them apart.
+ */
+export type SubtreeStatus = 'resolved' | 'pending' | 'rejected' | 'canceled' | 'timedout';
 
 export interface GraphNodeData {
-	promise: Promise;
+	promise: PromiseRecord;
 	subtreeStatus: SubtreeStatus;
 	duration: number | null;
 	role: string;
@@ -46,7 +59,7 @@ function inferParentFromId(id: string): string | null {
  * Builds a tree from a flat list of promises using resonate:parent tags
  * with fallback to ID prefix matching.
  */
-export function buildTree(rootId: string, promises: Promise[]): TreeNode | null {
+export function buildTree(rootId: string, promises: PromiseRecord[]): TreeNode | null {
 	const nodeMap = new Map<string, TreeNode>();
 	const childrenMap = new Map<string, TreeNode[]>();
 
@@ -74,19 +87,31 @@ export function buildTree(rootId: string, promises: Promise[]): TreeNode | null 
 		}
 	}
 
-	// Sort children by createdOn
+	// Sort children by creation time. This is the only ordering available:
+	// the server offers no sort parameter, so ordering is always done here.
 	for (const children of childrenMap.values()) {
-		children.sort((a, b) => (a.promise.createdOn ?? 0) - (b.promise.createdOn ?? 0));
+		children.sort((a, b) => a.promise.createdAt - b.promise.createdAt);
 	}
 
 	// Get root node
 	let root = nodeMap.get(rootId);
 	if (!root) {
-		// Root not in results - create placeholder
+		// The root was not among the results. Render a placeholder rather than
+		// nothing, but flag it: its state is unknown, not pending, and callers
+		// must not draw a badge from it.
 		root = {
-			promise: { id: rootId, state: 'UNKNOWN', timeout: 0 },
+			promise: {
+				id: rootId,
+				state: 'pending',
+				param: {},
+				value: {},
+				tags: {},
+				timeoutAt: 0,
+				createdAt: 0
+			},
 			children: [],
-			expanded: false
+			expanded: false,
+			missing: true
 		};
 	}
 
@@ -103,28 +128,32 @@ export function buildTree(rootId: string, promises: Promise[]): TreeNode | null 
 }
 
 /**
- * Fetches all promises for a tree using resonate:origin tag,
- * with fallback to ID prefix search.
+ * Fetches every promise belonging to a tree, by its `resonate:origin` tag.
+ *
+ * The old ID-prefix fallback is gone: `promise.search` has no `id` parameter,
+ * and passing one is silently ignored rather than rejected — so the fallback
+ * did not narrow anything, it just fetched the first page of the entire server
+ * and called it a tree.
+ *
+ * A tree whose promises lack `resonate:origin` is therefore not reachable, and
+ * the caller should say so rather than showing a plausible wrong graph.
  */
 export async function fetchTreePromises(
 	rootId: string,
-	fetchFn: (params: { id?: string; tags?: Record<string, string>; cursor?: string; limit?: number }) => globalThis.Promise<{ promises: Promise[]; cursor?: string }>
-): globalThis.Promise<Promise[]> {
-	const allPromises: Promise[] = [];
+	fetchFn: (params: {
+		tags?: Record<string, string>;
+		cursor?: string;
+		limit?: number;
+	}) => globalThis.Promise<{ promises: PromiseRecord[]; cursor?: string }>
+): globalThis.Promise<PromiseRecord[]> {
+	const allPromises: PromiseRecord[] = [];
 	let cursor: string | undefined;
 
-	// First try with resonate:origin tag
 	do {
 		const result = await fetchFn({ tags: { 'resonate:origin': rootId }, cursor, limit: 100 });
 		allPromises.push(...result.promises);
 		cursor = result.cursor;
 	} while (cursor);
-
-	// If no results, try ID-based search (e.g., rootId.*)
-	if (allPromises.length === 0) {
-		const result = await fetchFn({ id: rootId + '*', limit: 100 });
-		allPromises.push(...result.promises);
-	}
 
 	return allPromises;
 }
@@ -132,7 +161,7 @@ export async function fetchTreePromises(
 /**
  * Checks if a promise is a root (has no parent or parent === self).
  */
-export function isRoot(p: Promise): boolean {
+export function isRoot(p: PromiseRecord): boolean {
 	const parent = p.tags?.['resonate:parent'];
 	if (parent && parent !== p.id) {
 		return false; // Has a parent tag
@@ -152,7 +181,7 @@ export function isRoot(p: Promise): boolean {
  * Checks if a promise is a root within a given set of promises.
  * Uses both tag-based and ID-based parent detection.
  */
-export function isRootInSet(p: Promise, allPromises: Promise[]): boolean {
+export function isRootInSet(p: PromiseRecord, allPromises: PromiseRecord[]): boolean {
 	// First check tags
 	const parent = p.tags?.['resonate:parent'];
 	if (parent && parent !== p.id) {
@@ -172,7 +201,7 @@ export function isRootInSet(p: Promise, allPromises: Promise[]): boolean {
 /**
  * Determines the role/type of a promise (for child promises).
  */
-export function promiseRole(p: Promise): string {
+export function promiseRole(p: PromiseRecord): string {
 	if (p.tags?.['resonate:timeout']) {
 		return 'sleep';
 	}
@@ -185,14 +214,36 @@ export function promiseRole(p: Promise): string {
 	return 'root';
 }
 
-/**
- * Normalizes promise state string to a simple status.
- */
-function normalizeState(state: string): SubtreeStatus {
-	if (state === 'RESOLVED') return 'resolved';
-	if (state === 'PENDING') return 'pending';
-	return 'rejected'; // REJECTED, REJECTED_CANCELED, REJECTED_TIMEDOUT, UNKNOWN
+/** Maps a server state onto its display status, one-to-one. */
+function normalizeState(state: PromiseState): SubtreeStatus {
+	switch (state) {
+		case 'resolved':
+			return 'resolved';
+		case 'pending':
+			return 'pending';
+		case 'rejected_canceled':
+			return 'canceled';
+		case 'rejected_timedout':
+			return 'timedout';
+		case 'rejected':
+			return 'rejected';
+	}
 }
+
+/**
+ * Worst-first precedence for rolling a subtree up into one status.
+ *
+ * An outright rejection outranks a timeout, which outranks a cancellation,
+ * because that is the order in which an operator wants to be told. Pending
+ * outranks resolved so a run in flight never reads as finished.
+ */
+const STATUS_SEVERITY: Record<SubtreeStatus, number> = {
+	rejected: 4,
+	timedout: 3,
+	canceled: 2,
+	pending: 1,
+	resolved: 0
+};
 
 /**
  * Computes the aggregate status of a node's subtree.
@@ -201,28 +252,23 @@ function normalizeState(state: string): SubtreeStatus {
  * Otherwise 'resolved'.
  */
 export function computeSubtreeStatus(node: TreeNode): SubtreeStatus {
-	if (node.children.length === 0) {
-		return normalizeState(node.promise.state);
+	let worst = normalizeState(node.promise.state);
+	for (const child of node.children) {
+		const status = computeSubtreeStatus(child);
+		if (STATUS_SEVERITY[status] > STATUS_SEVERITY[worst]) worst = status;
 	}
-	const childStatuses = node.children.map((c) => computeSubtreeStatus(c));
-	if (childStatuses.includes('rejected')) return 'rejected';
-	if (childStatuses.includes('pending')) return 'pending';
-	// Also check this node's own state
-	const own = normalizeState(node.promise.state);
-	if (own === 'rejected') return 'rejected';
-	if (own === 'pending') return 'pending';
-	return 'resolved';
+	return worst;
 }
 
 /**
  * Computes duration in milliseconds from createdOn to completedOn.
  * Returns null if either timestamp is missing.
  */
-export function computeDuration(p: Promise): number | null {
-	if (p.createdOn != null && p.completedOn != null) {
-		return p.completedOn - p.createdOn;
-	}
-	return null;
+export function computeDuration(p: PromiseRecord): number | null {
+	// `settledAt` is absent while a promise is pending — the key is missing
+	// rather than null — so an unsettled promise has no duration yet.
+	if (p.settledAt == null) return null;
+	return p.settledAt - p.createdAt;
 }
 
 /**
@@ -240,7 +286,7 @@ export function formatDuration(ms: number): string {
  * e.g., "order-abc-123.2.charge-payment" -> "charge-payment"
  * e.g., "order-abc-123" -> "order-abc-123"
  */
-export function promiseLabel(p: Promise): string {
+export function promiseLabel(p: PromiseRecord): string {
 	// Use the last segment after the last dot
 	const lastDot = p.id.lastIndexOf('.');
 	if (lastDot > 0) {
@@ -300,9 +346,6 @@ export function treeToGraphData(
 				if (!isNaN(parsed)) {
 					sleepDuration = parsed;
 				}
-			} else if (node.promise.timeout) {
-				// Fallback to timeout field
-				sleepDuration = node.promise.timeout;
 			}
 		}
 

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { timeToX } from '$lib/utils/timeline';
 	import type { TimelineBar } from '$lib/utils/timeline';
+	import type { PromiseState } from '$lib/api/client';
+	import { stateColor, toSubtreeStatus } from '$lib/utils/state';
 
 	interface Props {
 		bar: TimelineBar;
@@ -16,20 +18,7 @@
 	let x2 = $derived(timeToX(bar.endTime ?? maxTime, minTime, maxTime, width));
 	let barWidth = $derived(Math.max(x2 - x, 2)); // Minimum 2px for visibility
 
-	function barColor(state: string): string {
-		switch (state) {
-			case 'RESOLVED':
-				return 'var(--green)';
-			case 'PENDING':
-				return 'var(--yellow)';
-			case 'REJECTED':
-			case 'REJECTED_CANCELED':
-			case 'REJECTED_TIMEDOUT':
-				return 'var(--red)';
-			default:
-				return 'var(--muted)';
-		}
-	}
+	const barColor = stateColor;
 
 	function roleColor(role: string): string {
 		switch (role) {
@@ -44,26 +33,20 @@
 		}
 	}
 
-	// Use high-contrast text color based on bar state for better readability
-	function textColor(state: string): string {
-		switch (state) {
-			case 'RESOLVED':
-				// White text on green background for better contrast
+	/** Contrast against the bar fill, which is what `barColor` just painted. */
+	function textColor(state: PromiseState): string {
+		switch (toSubtreeStatus(state)) {
+			case 'pending':
+				return '#1a1d24'; // dark on yellow
+			case 'canceled':
+			case 'resolved':
+			case 'rejected':
+			case 'timedout':
 				return '#ffffff';
-			case 'PENDING':
-				// Dark text on yellow background
-				return '#1a1d24';
-			case 'REJECTED':
-			case 'REJECTED_CANCELED':
-			case 'REJECTED_TIMEDOUT':
-				// White text on red background
-				return '#ffffff';
-			default:
-				return 'var(--text)';
 		}
 	}
 
-	let isPending = $derived(bar.state === 'PENDING');
+	let isPending = $derived(bar.state === 'pending');
 
 	function handleClick() {
 		onClick?.(bar.id);

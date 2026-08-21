@@ -1,8 +1,8 @@
 <script lang="ts">
-	import type { Promise } from '$lib/api/client';
+	import type { PromiseRecord } from '$lib/api/client';
 
 	interface Props {
-		promises: Promise[];
+		promises: PromiseRecord[];
 	}
 
 	let { promises }: Props = $props();
@@ -25,9 +25,9 @@
 		const buckets = new Array(bucketCount).fill(0);
 
 		for (const p of promises) {
-			if (p.state !== 'RESOLVED' || !p.completedOn) continue;
+			if (p.state !== 'resolved' || p.settledAt == null) continue;
 
-			const age = now - p.completedOn;
+			const age = now - p.settledAt;
 			if (age < 0 || age > bucketSize * bucketCount) continue;
 
 			const bucketIndex = Math.floor(age / bucketSize);
