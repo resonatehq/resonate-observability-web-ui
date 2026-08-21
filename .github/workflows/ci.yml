@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # svelte-check must stay at zero. The toolchain upgrade brought it from
+      # 9 errors / 4 warnings to 0/0; this gate is what keeps it there.
+      - name: Typecheck
+        run: npm run check
+
+      - name: Build
+        run: npm run build

@@ -61,7 +61,7 @@
 		defaultEdgeOptions={{ animated: false }}
 		onnodeclick={handleNodeClick}
 	>
-		<Background variant={BackgroundVariant.Dots} gap={20} size={1} patternColor="#1a1d24" />
+		<Background variant={BackgroundVariant.Dots} gap={20} size={1} patternClass="graph-dots" />
 		{#if interactive}
 			<Controls position="bottom-right" />
 			<MiniMap
@@ -107,18 +107,22 @@
 		--xy-node-border-radius: 6px;
 		--xy-node-border: none;
 		--xy-node-box-shadow: none;
-		--xy-minimap-background-color: #13151a;
-		--xy-minimap-mask-background-color: rgba(8, 10, 14, 0.7);
-		--xy-controls-button-background-color: #13151a;
-		--xy-controls-button-color: #e4e7eb;
-		--xy-controls-button-border-color: #2a2d3a;
-		--xy-edge-stroke: #3a3d4a;
+		--xy-minimap-background-color: var(--bg-surface);
+		--xy-minimap-mask-background-color: var(--minimap-mask);
+		--xy-controls-button-background-color: var(--bg-surface);
+		--xy-controls-button-color: var(--text);
+		--xy-controls-button-border-color: var(--border);
+		--xy-edge-stroke: var(--edge-default);
 		--xy-edge-stroke-width: 2;
 		--xy-attribution-background-color: transparent;
 	}
 
 	.graph-wrapper :global(.svelte-flow__controls button:hover) {
-		background: #1a1d24;
+		background: var(--bg-surface-hover);
+	}
+
+	.graph-wrapper :global(.graph-dots) {
+		fill: var(--graph-dots);
 	}
 
 	.graph-wrapper :global(.svelte-flow__attribution) {

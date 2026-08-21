@@ -102,17 +102,29 @@ src/
 
 ## API Compatibility
 
-Connects to the Resonate HTTP API:
-
-- `GET /promises` — Search promises with filtering
-- `GET /promises/{id}` — Get promise by ID
-- `GET /schedules` — List schedules
-- `GET /schedules/{id}` — Get schedule by ID
-
-Query parameters use deepObject encoding for tags:
-```
-GET /promises?tags[resonate:origin]=workflow-123
-```
+> ### ⚠️ This UI does not currently work against a recent Resonate server
+>
+> It is written against the legacy REST endpoints (`GET /promises`, `GET /promises/{id}`,
+> `GET /schedules`, `GET /schedules/{id}`). Those endpoints were removed and now return
+> **HTTP 410 Gone** — verified against `main`, `v0.9.8` and `v0.9.6`.
+>
+> The server replaced them with a single envelope endpoint:
+>
+> ```
+> POST /
+> { "kind": "promise.search", "head": { "corrId": "...", "version": "..." }, "data": { ... } }
+> ```
+>
+> Relevant kinds: `promise.create` · `promise.get` · `promise.search` · `promise.settle` ·
+> `schedule.create` · `schedule.delete` · `schedule.get` · `schedule.search` · `task.*`.
+>
+> Porting the client to this protocol is the next piece of work. It is not a transport swap —
+> field names changed (`createdOn` → `createdAt`, `completedOn` → `settledAt`,
+> `timeout` → `timeoutAt`) and promise states are now lower-case with five values
+> (`pending`, `resolved`, `rejected`, `rejected_canceled`, `rejected_timedout`).
+>
+> Note also that `promise.search` accepts only `{state, tags, limit, cursor}` — there is no
+> ID or wildcard search and no sort, so the search boxes in this UI have no backend behind them.
 
 ---
 

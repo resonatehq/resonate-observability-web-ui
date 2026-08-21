@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { searchPromises } from '$lib/api/client';
 	import PromiseTable from '$lib/components/PromiseTable.svelte';
 	import type { Promise } from '$lib/api/client';
@@ -26,8 +27,11 @@
 		load();
 	}
 
+	// Load once on mount only. Reading `query`/`stateFilter` inside a tracked
+	// effect made this fire a request per keystroke and left the Search button
+	// doing nothing; searches are now driven by submit and the state <select>.
 	$effect(() => {
-		load();
+		untrack(() => load());
 	});
 </script>
 
