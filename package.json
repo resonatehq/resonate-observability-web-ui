@@ -7,7 +7,10 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --test \"mocks/*.test.mjs\"",
+    "mock": "node mocks/server.mjs --cors http://localhost:5173",
+    "conformance": "node mocks/conformance.mjs"
   },
   "engines": {
     "node": "^20.19 || ^22.12 || >=24"
