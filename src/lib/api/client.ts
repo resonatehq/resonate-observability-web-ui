@@ -272,6 +272,65 @@ export async function getSchedule(id: string): globalThis.Promise<ScheduleRecord
 }
 
 /**
+ * src/types.rs:615-632.
+ *
+ * `promiseTimeout` has no serde default and is therefore REQUIRED — omitting
+ * it fails deserialization with `missing field promiseTimeout`, not a
+ * defaulted zero. `promiseParam` and `promiseTags` do default.
+ */
+export interface CreateScheduleParams {
+	id: string;
+	cron: string;
+	promiseId: string;
+	promiseTimeout: number;
+	promiseParam?: PromiseValue;
+	promiseTags?: Record<string, string>;
+}
+
+/**
+ * The outcome of a create, with the duplicate case called out separately.
+ *
+ * `schedule.create` is not idempotent-with-update and it is not a conflict
+ * error: given an id that already exists the server returns **200 with the
+ * pre-existing record untouched** (src/oracle.rs:1501-1508), discarding
+ * everything that was just submitted. Nothing in the envelope marks this as
+ * different from a successful create, so the only way to detect it is to
+ * compare the record that came back against what went out — which is what
+ * `duplicate` reports. Without that check the UI cheerfully reports success
+ * for a schedule it did not create, running on somebody else's cron.
+ *
+ * Limit worth knowing: resubmitting an id with a cron and template identical
+ * to the existing record is indistinguishable from a fresh create, because
+ * every field matches. `createdAt` would tell us, but only by trusting the
+ * browser clock against the server's, and a skewed clock would then report
+ * false duplicates on genuine creates. The undetectable case is the benign
+ * one — the schedule that exists is the schedule that was asked for — so
+ * this trades it for not lying in the other direction.
+ */
+export interface CreateScheduleOutcome {
+	schedule: ScheduleRecord;
+	duplicate: boolean;
+}
+
+export async function createSchedule(
+	params: CreateScheduleParams
+): globalThis.Promise<CreateScheduleOutcome> {
+	const data = await rpc<{ schedule: ScheduleRecord }>('schedule.create', {
+		id: params.id,
+		cron: params.cron,
+		promiseId: params.promiseId,
+		promiseTimeout: params.promiseTimeout,
+		promiseParam: params.promiseParam ?? {},
+		promiseTags: params.promiseTags ?? {}
+	});
+
+	const returned = data.schedule;
+	const duplicate = returned.cron !== params.cron || returned.promiseId !== params.promiseId;
+
+	return { schedule: returned, duplicate };
+}
+
+/**
  * Probes reachability without needing a valid token: `/health` is the server's
  * only unauthenticated GET (src/server.rs:102-104).
  *
