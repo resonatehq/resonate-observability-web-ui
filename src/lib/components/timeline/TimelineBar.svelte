@@ -25,25 +25,24 @@
 			case 'rpc':
 				return 'var(--secondary)';
 			case 'run':
-				return '#a855f7';
+				return 'var(--role-run)';
 			case 'sleep':
-				return 'var(--muted)';
+				return 'var(--text-muted)';
 			default:
 				return 'var(--text)';
 		}
 	}
 
-	/** Contrast against the bar fill, which is what `barColor` just painted. */
+	/**
+	 * Contrast against the bar fill, which is what `barColor` just painted.
+	 *
+	 * This was two hardcoded values picked for the old dark-only palette, so the
+	 * light theme got whichever one happened to be wrong. Each state now carries
+	 * its own `-on` token, chosen per theme against that state's actual mark —
+	 * every pair clears 4.5:1.
+	 */
 	function textColor(state: PromiseState): string {
-		switch (toSubtreeStatus(state)) {
-			case 'pending':
-				return '#1a1d24'; // dark on yellow
-			case 'canceled':
-			case 'resolved':
-			case 'rejected':
-			case 'timedout':
-				return '#ffffff';
-		}
+		return `var(--status-${toSubtreeStatus(state)}-on)`;
 	}
 
 	let isPending = $derived(bar.state === 'pending');

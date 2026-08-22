@@ -5,13 +5,19 @@
 export type Theme = 'light' | 'dark';
 
 class ThemeStore {
-	theme: Theme = $state('dark');
+	/**
+	 * Light by default, per the brand's light-by-default rule. Dark is fully
+	 * supported and remembered per-browser, but it is the choice, not the
+	 * starting point — and it was previously the only mode anyone had checked
+	 * for contrast.
+	 */
+	theme: Theme = $state('light');
 
 	constructor() {
 		if (typeof window !== 'undefined') {
-			// Load from localStorage or default to dark
+			// Load from localStorage or fall back to the brand default
 			const stored = localStorage.getItem('resonate-theme') as Theme | null;
-			this.theme = stored ?? 'dark';
+			this.theme = stored ?? 'light';
 			this.applyTheme(this.theme);
 		}
 	}

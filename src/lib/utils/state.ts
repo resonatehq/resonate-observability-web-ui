@@ -72,54 +72,42 @@ export function toSubtreeStatus(state: PromiseState): SubtreeStatus {
 }
 
 export function subtreeColor(status: SubtreeStatus): string {
-	switch (status) {
-		case 'resolved':
-			return 'var(--green)';
-		case 'pending':
-			return 'var(--yellow)';
-		case 'rejected':
-			return 'var(--red)';
-		case 'timedout':
-			return 'var(--orange)';
-		case 'canceled':
-			return 'var(--gray)';
-	}
+	return `var(--status-${status})`;
 }
 
 /**
- * Literal hex values, for the minimap — SvelteFlow paints it to a canvas, which
- * cannot resolve CSS custom properties. These must stay in step with the
- * `--green` / `--yellow` / `--red` / `--orange` / `--gray` tokens in app.css.
+ * Last-resort values, used only when there is no document to read tokens from
+ * (SSR, or a canvas painted before styles resolve). These are the light-mode
+ * status marks; light is the default theme.
+ */
+const STATUS_FALLBACK: Record<SubtreeStatus, string> = {
+	resolved: '#0FB3A1',
+	pending: '#D97706',
+	rejected: '#831843',
+	timedout: '#451A03',
+	canceled: '#75716D'
+};
+
+/**
+ * Resolved hex, for the minimap — SvelteFlow paints it to a canvas, which
+ * cannot resolve CSS custom properties itself.
+ *
+ * This used to be a second hardcoded copy of the palette that had to be kept in
+ * step with app.css by hand, and which silently drifted when it wasn't. Reading
+ * the token off the document instead means there is exactly one source of truth
+ * again, and the minimap follows the theme for free.
  */
 export function subtreeColorHex(status: SubtreeStatus): string {
-	switch (status) {
-		case 'resolved':
-			return '#22c55e';
-		case 'pending':
-			return '#eab308';
-		case 'rejected':
-			return '#ef4444';
-		case 'timedout':
-			return '#f97316';
-		case 'canceled':
-			return '#6b7280';
-	}
+	if (typeof document === 'undefined') return STATUS_FALLBACK[status];
+	const token = getComputedStyle(document.documentElement)
+		.getPropertyValue(`--status-${status}`)
+		.trim();
+	return token || STATUS_FALLBACK[status];
 }
 
 /** Badge class name for a state. */
 export function stateBadgeClass(state: PromiseState): string {
-	switch (toSubtreeStatus(state)) {
-		case 'resolved':
-			return 'badge-green';
-		case 'pending':
-			return 'badge-yellow';
-		case 'rejected':
-			return 'badge-red';
-		case 'timedout':
-			return 'badge-orange';
-		case 'canceled':
-			return 'badge-gray';
-	}
+	return `badge-${toSubtreeStatus(state)}`;
 }
 
 /** True for any of the three ways a promise can end badly. */

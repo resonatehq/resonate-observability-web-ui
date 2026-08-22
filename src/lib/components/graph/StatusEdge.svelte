@@ -29,7 +29,7 @@
 	);
 
 	let color = $derived(
-		data?.subtreeStatus ? subtreeColor(data.subtreeStatus) : 'var(--edge-default, #3a3d4a)'
+		data?.subtreeStatus ? subtreeColor(data.subtreeStatus) : 'var(--edge-default)'
 	);
 </script>
 

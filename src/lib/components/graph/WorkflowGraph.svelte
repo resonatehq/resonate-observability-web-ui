@@ -83,7 +83,7 @@
 	.graph-wrapper {
 		width: 100%;
 		height: 100%;
-		background: var(--bg, #080a0e);
+		background: var(--bg);
 		border-radius: 8px;
 		overflow: hidden;
 	}

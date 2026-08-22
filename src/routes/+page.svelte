@@ -159,7 +159,7 @@
 
 	.metric-card:hover {
 		border-color: var(--secondary);
-		box-shadow: 0 0 0 1px rgba(30, 227, 207, 0.1);
+		box-shadow: 0 0 0 1px var(--secondary-bg-soft);
 		text-decoration: none;
 	}
 
@@ -185,15 +185,15 @@
 	}
 
 	.metric-trend.pending {
-		color: var(--yellow);
+		color: var(--status-pending-fg);
 	}
 
 	.metric-trend.resolved {
-		color: var(--green);
+		color: var(--status-resolved-fg);
 	}
 
 	.metric-trend.rejected {
-		color: var(--red);
+		color: var(--status-rejected-fg);
 	}
 
 	.content-grid {

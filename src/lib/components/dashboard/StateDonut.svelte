@@ -31,15 +31,15 @@
 		// otherwise cancellations and timeouts are counted twice and the ring
 		// overflows the circle.
 		const data = [
-			{ label: 'Resolved', value: stats.resolved, color: 'var(--green)' },
-			{ label: 'Pending', value: stats.pending, color: 'var(--yellow)' },
+			{ label: 'Resolved', value: stats.resolved, color: 'var(--status-resolved)' },
+			{ label: 'Pending', value: stats.pending, color: 'var(--status-pending)' },
 			{
 				label: 'Rejected',
 				value: stats.rejected - stats.rejectedCanceled - stats.rejectedTimedOut,
-				color: 'var(--red)'
+				color: 'var(--status-rejected)'
 			},
-			{ label: 'Timed out', value: stats.rejectedTimedOut, color: 'var(--orange)' },
-			{ label: 'Canceled', value: stats.rejectedCanceled, color: 'var(--gray)' }
+			{ label: 'Timed out', value: stats.rejectedTimedOut, color: 'var(--status-timedout)' },
+			{ label: 'Canceled', value: stats.rejectedCanceled, color: 'var(--status-canceled)' }
 		];
 
 		let offset = 0;
@@ -91,25 +91,25 @@
 
 	<div class="donut-legend">
 		<div class="legend-item">
-			<span class="legend-color" style="background: var(--green);"></span>
+			<span class="legend-color" style="background: var(--status-resolved);"></span>
 			<span class="legend-label">Resolved: {stats.resolved}</span>
 		</div>
 		<div class="legend-item">
-			<span class="legend-color" style="background: var(--yellow);"></span>
+			<span class="legend-color" style="background: var(--status-pending);"></span>
 			<span class="legend-label">Pending: {stats.pending}</span>
 		</div>
 		<div class="legend-item">
-			<span class="legend-color" style="background: var(--red);"></span>
+			<span class="legend-color" style="background: var(--status-rejected);"></span>
 			<span class="legend-label">
 				Rejected: {stats.rejected - stats.rejectedCanceled - stats.rejectedTimedOut}
 			</span>
 		</div>
 		<div class="legend-item">
-			<span class="legend-color" style="background: var(--orange);"></span>
+			<span class="legend-color" style="background: var(--status-timedout);"></span>
 			<span class="legend-label">Timed out: {stats.rejectedTimedOut}</span>
 		</div>
 		<div class="legend-item">
-			<span class="legend-color" style="background: var(--gray);"></span>
+			<span class="legend-color" style="background: var(--status-canceled);"></span>
 			<span class="legend-label">Canceled: {stats.rejectedCanceled}</span>
 		</div>
 	</div>

@@ -111,7 +111,7 @@
 	}
 
 	.progress-bar.pending {
-		background: var(--yellow);
+		background: var(--status-pending);
 		animation: pulse-glow 2s ease-in-out infinite;
 	}
 

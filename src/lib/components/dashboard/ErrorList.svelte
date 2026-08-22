@@ -65,7 +65,7 @@
 	}
 
 	.error-item:hover {
-		border-color: var(--red);
+		border-color: var(--status-rejected);
 		background: var(--bg-surface-hover);
 	}
 

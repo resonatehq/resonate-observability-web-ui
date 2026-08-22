@@ -125,13 +125,13 @@
 	}
 
 	.test-result.ok {
-		color: var(--green);
-		background: var(--green-bg);
+		color: var(--status-resolved-fg);
+		background: var(--status-resolved-bg);
 	}
 
 	.test-result.bad {
-		color: var(--red);
-		background: var(--red-bg);
+		color: var(--status-rejected-fg);
+		background: var(--status-rejected-bg);
 	}
 
 	.warning-card {
@@ -139,7 +139,7 @@
 	}
 
 	.warning-card h2 {
-		color: var(--orange);
+		color: var(--status-timedout-fg);
 	}
 
 	.settings-card {
@@ -198,6 +198,6 @@
 
 	.save-confirmation {
 		font-size: 0.875rem;
-		color: var(--green);
+		color: var(--status-resolved-fg);
 	}
 </style>
