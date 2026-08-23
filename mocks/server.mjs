@@ -23,6 +23,9 @@
  */
 
 import { createServer } from 'node:http';
+// Shared with the app so the fixture's fire times and the UI's preview cannot
+// disagree. Plain .js with JSDoc types precisely so both can import it.
+import { serverAcceptsCron as isValidCron, serverNextRunAt as computeNextCron } from '../src/lib/utils/cron.js';
 import {
 	DEFAULT_SEARCH_LIMIT,
 	LEGACY_PATHS,
@@ -170,7 +173,9 @@ const ops = {
 	},
 
 	'schedule.create'(store, { kind, corrId, data }) {
-		// src/types.rs:616-632
+		// Validation order copied from src/oracle.rs:1488-1527 — deserialization
+		// first, then cron validity, then the duplicate check. Verified against
+		// resonate 0.9.8 by creating real schedules and reading nextRunAt back.
 		for (const [field, message] of [
 			['id', 'Schedule ID is required'],
 			['cron', 'Cron expression is required'],
@@ -180,17 +185,36 @@ const ops = {
 				return errorEnvelope(kind, corrId, 400, message);
 			}
 		}
+
+		// `promiseTimeout` has NO serde default (src/types.rs:625-627), so a
+		// missing one is a deserialization failure, not a defaulted zero. The
+		// fixture used to default it, which let the UI omit the field and pass
+		// here while failing against every real server.
+		if (typeof data.promiseTimeout !== 'number') {
+			return errorEnvelope(kind, corrId, 400, 'Invalid request: missing field `promiseTimeout`');
+		}
+
+		// src/oracle.rs:1493 — the fixture did not validate cron at all, so any
+		// garbage expression "succeeded" here and 400'd against a real server.
+		if (!isValidCron(data.cron)) {
+			return errorEnvelope(kind, corrId, 400, 'Invalid cron expression');
+		}
+
 		const existing = store.schedules.find((s) => s.id === data.id);
 		if (existing) return envelope(kind, corrId, 200, { schedule: existing });
+
+		const now = store.clock();
 		const record = {
 			id: data.id,
 			cron: data.cron,
 			promiseId: data.promiseId,
-			promiseTimeout: data.promiseTimeout ?? 0,
+			promiseTimeout: data.promiseTimeout,
 			promiseParam: data.promiseParam ?? {},
 			promiseTags: data.promiseTags ?? {},
-			createdAt: store.clock(),
-			nextRunAt: store.clock() + 3_600_000
+			createdAt: now,
+			// Was `now + 3_600_000` regardless of the cron, so a fixture-backed
+			// UI could not tell a correct fire-time preview from a wrong one.
+			nextRunAt: computeNextCron(data.cron, now)
 		};
 		store.schedules.push(record);
 		return envelope(kind, corrId, 200, { schedule: record });
