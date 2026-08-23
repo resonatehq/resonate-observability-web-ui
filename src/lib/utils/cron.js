@@ -29,8 +29,10 @@
  *      Monday", which fires far more rarely than a Unix user would expect.
  *   3. Fields are seconds-first when six are given: `sec min hour dom month
  *      dow`. A five-field expression gets a `0` seconds field prepended.
- *   4. `L`, `W` and `#` are not supported and are rejected. `?` is accepted
- *      and means the same as `*`.
+ *   4. `L`, `W` and `#` are not supported and are rejected. `?` means the same
+ *      as `*` but is POSITIONAL: the server takes it only in day-of-month and
+ *      day-of-week, and rejects it in seconds, minutes, hours, month and year.
+ *      Unlike Quartz it will take `?` in both day fields at once.
  *
  * ── Everything is UTC ─────────────────────────────────────────────────────
  *
@@ -84,16 +86,25 @@ const MONTH_LABELS = [
  * @property {number} min
  * @property {number} max
  * @property {Record<string, number>} [names]
+ * @property {boolean} [question]  Whether this field accepts `?`.
  */
 
-/** @type {FieldSpec[]} */
+/**
+ * `question` is not decoration. The server accepts `?` in the two day fields
+ * and rejects it everywhere else — verified field by field against a running
+ * 0.9.8, one `?` at a time into `0 0 0 1 1 *`. Treating `?` as a universal
+ * wildcard is what let `? * * * *` draw a full fire-time preview, describe
+ * itself, pass the submit gate and then come back 400.
+ *
+ * @type {FieldSpec[]}
+ */
 const FIELDS = [
 	{ key: 'sec', label: 'seconds', min: 0, max: 59 },
 	{ key: 'min', label: 'minutes', min: 0, max: 59 },
 	{ key: 'hour', label: 'hours', min: 0, max: 23 },
-	{ key: 'dom', label: 'day of month', min: 1, max: 31 },
+	{ key: 'dom', label: 'day of month', min: 1, max: 31, question: true },
 	{ key: 'month', label: 'month', min: 1, max: 12, names: MONTH_NAMES },
-	{ key: 'dow', label: 'day of week', min: 1, max: 7, names: DOW_NAMES }
+	{ key: 'dow', label: 'day of week', min: 1, max: 7, names: DOW_NAMES, question: true }
 ];
 
 /**
@@ -169,6 +180,13 @@ function parseField(raw, spec) {
 			step = Number(stepPart);
 		}
 
+		if (rangePart === '?' && !spec.question) {
+			return {
+				ok: false,
+				error: `\`?\` is not allowed in the ${spec.label} field. This server takes it only in day of month and day of week — use \`*\` here.`
+			};
+		}
+
 		let start;
 		let end;
 		if (rangePart === '*' || rangePart === '?') {
@@ -228,8 +246,15 @@ export function parseCron(expr) {
 		// once in the year asked for. A year range is accepted and lands on the
 		// wrong year. `*` is the only year value that behaves.
 		const year = parts[6];
-		if (year === '*' || year === '?') {
+		if (year === '*') {
 			parts = parts.slice(0, 6);
+		} else if (year === '?') {
+			// `?` is legal in the two day fields but NOT here — the server
+			// rejects `0 0 0 1 1 * ?` outright.
+			return {
+				ok: false,
+				error: '`?` is not allowed in the year field. Use `*`, or drop the field.'
+			};
 		} else {
 			return {
 				ok: false,
@@ -274,8 +299,21 @@ export function parseCron(expr) {
 	return { ok: true, fields, normalized: parts.join(' ') };
 }
 
-/** Eight years of day-steps: enough for `Feb 29`, bounded for `Feb 30`. */
-const MAX_DAYS_SCANNED = 366 * 8;
+/**
+ * The crate's year field spans 1970-2100, so 2100 is the last year any
+ * expression can fire in and scanning past it proves the expression never
+ * fires at all.
+ *
+ * This used to be an eight-year day budget, which was not a bound on the
+ * search so much as a bound on the truth: because day-of-month and day-of-week
+ * are ANDed, ordinary expressions land decades out. `0 0 29 2 6` — the 29th of
+ * February when it falls on a Friday — is 2036, and `0 0 29 2 7` is 2048. Both
+ * were reported as "never fires", which also disabled the submit button, so
+ * the UI refused to create schedules the server accepts and gave a false
+ * reason for it. Scanning the real range costs a few milliseconds and lets the
+ * "never" in that message mean never.
+ */
+export const CRON_MAX_YEAR = 2100;
 
 /**
  * @param {CronFields} fields
@@ -294,7 +332,8 @@ function dayMatches(fields, d) {
 
 /**
  * The next fire time strictly after `afterMs`, or null if the expression
- * cannot fire within the scan window (e.g. `0 0 30 2 *` — February 30th).
+ * cannot fire at all before the crate's 2100 ceiling (e.g. `0 0 30 2 *` —
+ * February 30th).
  *
  * @param {CronFields} fields
  * @param {number} afterMs
@@ -307,14 +346,14 @@ function nextAfter(fields, afterMs) {
 
 	let cursor = new Date(Math.floor(afterMs / 1000) * 1000 + 1000);
 
-	for (let scanned = 0; scanned < MAX_DAYS_SCANNED; scanned++) {
+	while (cursor.getUTCFullYear() <= CRON_MAX_YEAR) {
 		const year = cursor.getUTCFullYear();
 		const month = cursor.getUTCMonth();
 		const date = cursor.getUTCDate();
 
 		if (dayMatches(fields, cursor)) {
 			// Only the first day of the scan starts part-way through.
-			const partial = scanned === 0;
+			const partial = cursor.getTime() !== Date.UTC(year, month, date, 0, 0, 0);
 			const fromH = partial ? cursor.getUTCHours() : 0;
 
 			for (const h of hours) {
@@ -345,10 +384,16 @@ function nextAfter(fields, afterMs) {
 /**
  * Project the next `count` fire times, as UTC epoch milliseconds.
  *
+ * `truncated` says the projection ran into the 2100 ceiling before finding
+ * `count` of them — the caller has every fire time there will ever be, but
+ * fewer than it asked for. A preview headed "next three runs" that silently
+ * renders one row is a worse lie than an empty one, so this is reported rather
+ * than left for the caller to infer from `times.length`.
+ *
  * @param {string} expr
  * @param {number} fromMs
  * @param {number} [count]
- * @returns {{ok: true, times: number[]} | {ok: false, error: string}}
+ * @returns {{ok: true, times: number[], truncated: boolean} | {ok: false, error: string}}
  */
 export function nextFireTimes(expr, fromMs, count = 3) {
 	const parsed = parseCron(expr);
@@ -356,23 +401,24 @@ export function nextFireTimes(expr, fromMs, count = 3) {
 
 	const times = [];
 	let cursor = fromMs;
+	let truncated = false;
 	for (let i = 0; i < count; i++) {
 		const next = nextAfter(parsed.fields, cursor);
 		if (next === null) {
 			if (times.length === 0) {
 				return {
 					ok: false,
-					error:
-						'This expression never fires — the day, month and weekday it asks for never coincide.'
+					error: `This expression never fires: the day, month and weekday it asks for never coincide between now and ${CRON_MAX_YEAR}, which is as far as this server's cron reaches.`
 				};
 			}
+			truncated = true;
 			break;
 		}
 		times.push(next);
 		cursor = next;
 	}
 
-	return { ok: true, times };
+	return { ok: true, times, truncated };
 }
 
 /**
@@ -389,20 +435,67 @@ function listOf(values, label) {
 }
 
 /**
+ * The step, if the set is a clean `*​/n` run that also WRAPS cleanly — i.e. if
+ * "every n" is true of the gap between the last value and the first value of
+ * the next cycle, not just of the gaps inside one cycle.
+ *
+ * That last condition is the whole point, and leaving it out made this
+ * function invent cadences nobody wrote. Two values are enough to satisfy
+ * "uniformly spaced" vacuously, so `0,23` in the hour field was reported as
+ * "every 23 hours" for a schedule whose runs are one hour apart, and `1,17` in
+ * day-of-month as "every 16 days" for real gaps of 16, 14, 15 and 12 — with
+ * the two dates the operator actually asked for nowhere in the sentence. The
+ * same slip made `*​/7` minutes read "every 7 minutes" when the last gap of
+ * each hour is 4.
+ *
+ * `(max - min + 1) % step === 0` is exactly the line between the honest cases
+ * (`*​/5` and `0,30` minutes, `0,12` hours) and the misleading ones, because a
+ * step that divides the field evenly is the only one whose wrap-around gap
+ * equals its internal gap.
+ *
  * @param {Set<number>} values
  * @param {number} min
  * @param {number} max
- * @returns {number | null} The step, if the set is a clean `*​/n` run.
+ * @returns {number | null}
  */
 function stepOf(values, min, max) {
 	const sorted = [...values].sort((a, b) => a - b);
 	if (sorted.length < 2 || sorted[0] !== min) return null;
 	const step = sorted[1] - sorted[0];
 	if (step < 2) return null;
+	if ((max - min + 1) % step !== 0) return null;
 	for (let i = 0; i < sorted.length; i++) {
 		if (sorted[i] !== min + i * step) return null;
 	}
 	return min + sorted.length * step > max ? step : null;
+}
+
+/**
+ * Collapse a numeric set into runs, so eleven consecutive seconds read as
+ * `10-20` rather than as eleven comma-separated numbers.
+ *
+ * @param {Set<number>} values
+ * @returns {string}
+ */
+function compactNumbers(values) {
+	const sorted = [...values].sort((a, b) => a - b);
+	/** @type {string[]} */
+	const tokens = [];
+	let i = 0;
+	while (i < sorted.length) {
+		let j = i;
+		while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+		if (j - i >= 2) {
+			tokens.push(`${sorted[i]}-${sorted[j]}`);
+			i = j + 1;
+		} else {
+			tokens.push(String(sorted[i]));
+			i++;
+		}
+	}
+	if (tokens.length === 1) return tokens[0];
+	if (tokens.length === 2) return `${tokens[0]} and ${tokens[1]}`;
+	return `${tokens.slice(0, -1).join(', ')} and ${tokens[tokens.length - 1]}`;
 }
 
 /** @param {number} n */
@@ -438,31 +531,54 @@ export function describeCron(expr) {
 	const singleHour = f.hour.size === 1;
 	const secValue = [...f.sec][0];
 
+	const minValue = [...f.min][0];
+
 	const secStep = stepOf(f.sec, 0, 59);
 	const minStep = stepOf(f.min, 0, 59);
 	const hourStep = stepOf(f.hour, 0, 23);
 
+	// Whether the branch taken below has already accounted for the seconds
+	// field. The ones that have not get a seconds clause appended, because
+	// otherwise `30 * * * * *`, `15,45 * * * * *` and `10-20 * * * * *` — one,
+	// two and eleven runs a minute — all render as the same sentence. For a
+	// describer whose entire job is "what will this actually do", not being
+	// able to tell those apart is the failure it exists to prevent.
+	let secSaid = false;
+
 	if (!r.sec && !r.min && !r.hour) {
 		time = 'every second';
+		secSaid = true;
 	} else if (secStep !== null && !r.min && !r.hour) {
 		time = `every ${secStep} seconds`;
+		secSaid = true;
 	} else if (singleSec && secValue === 0 && !r.min && !r.hour) {
 		time = 'every minute';
+		secSaid = true;
 	} else if (singleSec && minStep !== null && !r.hour) {
 		time = `every ${minStep} minutes`;
 	} else if (singleSec && singleMin && hourStep !== null) {
-		time = `every ${hourStep} hours, at ${[...f.min][0]} minutes past`;
+		time = `every ${hourStep} hours, at ${minValue} minutes past`;
 	} else if (singleSec && singleMin && !r.hour) {
-		time = `every hour at ${pad([...f.min][0])} minutes past`;
+		time = `every hour at ${minValue} minutes past`;
 	} else if (singleSec && singleMin && singleHour) {
-		const clock = `${pad([...f.hour][0])}:${pad([...f.min][0])}`;
+		const clock = `${pad([...f.hour][0])}:${pad(minValue)}`;
 		time = `at ${secValue === 0 ? clock : `${clock}:${pad(secValue)}`}`;
+		secSaid = true;
 	} else if (singleSec && singleMin) {
-		time = `at ${listOf(f.hour, (h) => `${pad(h)}:${pad([...f.min][0])}`)}`;
+		time = `at ${listOf(f.hour, (h) => `${pad(h)}:${pad(minValue)}`)}`;
 	} else {
-		const hourText = r.hour ? `hour ${listOf(f.hour, String)}` : 'every hour';
-		const minText = r.min ? `minute ${listOf(f.min, String)}` : 'every minute';
+		const hourText = r.hour ? `hour ${compactNumbers(f.hour)}` : 'every hour';
+		const minText = r.min ? `minute ${compactNumbers(f.min)}` : 'every minute';
 		time = `at ${minText} of ${hourText}`;
+	}
+
+	if (!secSaid) {
+		if (!r.sec) time += ', every second';
+		else if (singleSec) {
+			// A lone `0` is the implied default and needs no clause.
+			if (secValue !== 0) time += `, ${secValue} seconds past`;
+		} else if (secStep !== null) time += `, every ${secStep} seconds`;
+		else time += `, at seconds ${compactNumbers(f.sec)}`;
 	}
 
 	// ── which days ──────────────────────────────────────────────────────────
@@ -477,8 +593,11 @@ export function describeCron(expr) {
 		else if (isWeekend) days = 'on Saturday and Sunday';
 		else days = `on ${listOf(f.dow, (d) => DOW_LABELS[d])}`;
 	} else if (r.dom && !r.dow) {
-		const domStep = stepOf(f.dom, 1, 31);
-		days = domStep !== null ? `every ${domStep} days` : `on the ${listOf(f.dom, ordinal)}`;
+		// Deliberately never a cadence. Months are 28-31 days long, so a
+		// day-of-month step never produces the even spacing "every N days"
+		// promises: `*​/2` reads as every 2 days right up to the 31st, which is
+		// one day before the 1st. The list is longer and it is true.
+		days = `on the ${listOf(f.dom, ordinal)}`;
 	} else {
 		// Both restricted. The crate ANDs these, so say so explicitly — this is
 		// the case a Unix-cron reader will get backwards.
@@ -513,13 +632,68 @@ export function serverAcceptsCron(expr) {
 	if (parts.length < 5 || parts.length > 7) return false;
 
 	if (parts.length === 7) {
-		const year = parts[6];
-		// The crate's year field spans 1970-2100. Syntax only, same as the crate.
-		if (!/^(\*|\?|\d{4}(-\d{4})?)(\/\d+)?(,(\d{4}(-\d{4})?))*$/.test(year)) return false;
+		if (expandYearField(parts[6]) === null) return false;
 		return parseCron(parts.slice(0, 6).join(' ')).ok;
 	}
 
 	return parseCron(parts.join(' ')).ok;
+}
+
+/** The crate's year field spans 1970-2100 inclusive, both ends verified. */
+const CRON_MIN_YEAR = 1970;
+
+/**
+ * Expand a year field into the years it selects, or null if the server would
+ * reject it outright.
+ *
+ * The bound is the point. This was previously a regex that checked only for
+ * four digits, so the fixture accepted `1969`, `2101`, `3000`, `1969-1971` and
+ * `2100-2101` — every one of which a real server rejects — and accepted `?`,
+ * which is legal in the two day fields but not this one. A fixture being more
+ * permissive than the server is the one direction that matters, because it is
+ * the direction that lets a broken UI pass.
+ *
+ * A range is rejected if EITHER end falls outside the span, which is why this
+ * expands rather than clamping.
+ *
+ * @param {string} field
+ * @returns {number[] | null}
+ */
+function expandYearField(field) {
+	if (typeof field !== 'string' || field === '') return null;
+
+	const years = new Set();
+
+	for (const item of field.split(',')) {
+		if (item === '') return null;
+
+		const [rangePart, stepPart, ...extra] = item.split('/');
+		if (extra.length > 0) return null;
+
+		let step = 1;
+		if (stepPart !== undefined) {
+			if (!/^\d+$/.test(stepPart) || Number(stepPart) === 0) return null;
+			step = Number(stepPart);
+		}
+
+		let lo;
+		let hi;
+		if (rangePart === '*') {
+			lo = CRON_MIN_YEAR;
+			hi = CRON_MAX_YEAR;
+		} else {
+			const m = /^(\d{4})(?:-(\d{4}))?$/.exec(rangePart);
+			if (m === null) return null;
+			lo = Number(m[1]);
+			// `2040/5` means "from 2040 to the end of the field, every 5".
+			hi = m[2] !== undefined ? Number(m[2]) : stepPart === undefined ? lo : CRON_MAX_YEAR;
+		}
+
+		if (lo < CRON_MIN_YEAR || hi > CRON_MAX_YEAR || lo > hi) return null;
+		for (let y = lo; y <= hi; y += step) years.add(y);
+	}
+
+	return [...years].sort((a, b) => a - b);
 }
 
 /**
@@ -528,9 +702,30 @@ export function serverAcceptsCron(expr) {
  * rather than erroring, so a schedule the server accepted quietly becomes a
  * once-a-minute timer.
  *
- * Not modelled: a bounded year *range* (`2027-2030`), which the server
- * computes to a wrong-but-not-fallback year. The UI refuses to submit either
- * form, so the fixture reproduces the single-year case and stops there.
+ * ── What a bounded year actually does ─────────────────────────────────────
+ *
+ * The "fires every 60 seconds" behaviour is not a rule about single years and
+ * the "lands on the wrong year" behaviour is not a separate bug. Both fall out
+ * of one mistake, established by creating 22 schedules against a live 0.9.8
+ * and reading `nextRunAt` back:
+ *
+ *   The search visits the years in the field in ascending order. For the FIRST
+ *   candidate year it starts from `after`'s own month, day and time re-based
+ *   into that year — correct when the candidate IS the current year, and
+ *   nonsense when it is in the future. Every later candidate year is searched
+ *   from its own 1 January.
+ *
+ * That single carry explains the whole table. `2027-2030` on a 1 January cron
+ * skips 2027 (Jan 1 has "already passed" at August's date) and lands on 2028.
+ * `2027` has no later candidate to fall back to, so it produces nothing and
+ * the caller's 60-second retry path takes over — that is the once-a-minute
+ * timer. `0 0 * * * * 2027-2030` fires at the same clock time a year out. And
+ * a wildcard year is fine only because its first candidate is the current
+ * year, where carrying the date is the right thing to do.
+ *
+ * The UI refuses every bounded year, so none of this reaches an operator — but
+ * the fixture has to reproduce it, or a mock server disagrees with the real one
+ * about which schedules are silent bombs.
  *
  * @param {string} expr
  * @param {number} afterMs
@@ -538,13 +733,35 @@ export function serverAcceptsCron(expr) {
  */
 export function serverNextRunAt(expr, afterMs) {
 	const parts = expr.trim().split(/\s+/).filter(Boolean);
-	const boundedYear = parts.length === 7 && parts[6] !== '*' && parts[6] !== '?';
+	const hasYear = parts.length === 7;
+	const parsed = parseCron(hasYear ? parts.slice(0, 6).join(' ') : expr);
 
-	if (!boundedYear) {
-		const parsed = parseCron(parts.length === 7 ? parts.slice(0, 6).join(' ') : expr);
-		if (parsed.ok) {
+	if (parsed.ok) {
+		if (!hasYear || parts[6] === '*') {
 			const next = nextAfter(parsed.fields, afterMs);
 			if (next !== null) return next;
+		} else {
+			const years = expandYearField(parts[6]);
+			const after = new Date(afterMs);
+			const candidates = (years ?? []).filter((y) => y >= after.getUTCFullYear());
+
+			for (let i = 0; i < candidates.length; i++) {
+				const y = candidates[i];
+				const from =
+					i === 0
+						? Date.UTC(
+								y,
+								after.getUTCMonth(),
+								after.getUTCDate(),
+								after.getUTCHours(),
+								after.getUTCMinutes(),
+								after.getUTCSeconds()
+							)
+						: Date.UTC(y, 0, 1) - 1000;
+
+				const next = nextAfter(parsed.fields, from);
+				if (next !== null && new Date(next).getUTCFullYear() === y) return next;
+			}
 		}
 	}
 

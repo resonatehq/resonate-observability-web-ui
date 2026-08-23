@@ -15,7 +15,8 @@ import { createMockServer } from './server.mjs';
 import {
 	PROMISE_STATES,
 	PROTOCOL_VERSION,
-	DEFAULT_SEARCH_LIMIT
+	DEFAULT_SEARCH_LIMIT,
+	MAX_SEARCH_LIMIT
 } from './protocol.mjs';
 
 let baseUrl;
@@ -376,6 +377,236 @@ describe('schedules', () => {
 			filtered.body.data.schedules.length,
 			plain.body.data.schedules.length
 		);
+	});
+});
+
+/**
+ * The write path.
+ *
+ * Everything below was previously unexercised: `schedule.create` and
+ * `schedule.delete` had no HTTP-level test at all, so every fix in the handler
+ * — the required `promiseTimeout`, cron validation, the duplicate-id
+ * semantics, the delete status, the computed `nextRunAt` — could be reverted
+ * with the suite still green. That is not hypothetical: defaulting
+ * `promiseTimeout` is a mistake this fixture has already shipped once, and it
+ * is the reason a UI passed here and 400'd against every real server.
+ *
+ * These assert against independently-computed expectations, never against the
+ * fixture's own output.
+ */
+describe('schedule.create', () => {
+	const ok = (over = {}) => ({
+		id: `c-${++corrCounter}-${Math.trunc(corrCounter / 7)}`,
+		cron: '0 2 * * *',
+		promiseId: 'p-{{.timestamp}}',
+		promiseTimeout: 60_000,
+		promiseParam: {},
+		promiseTags: { 'resonate:target': 'poll://any@default' },
+		...over
+	});
+
+	test('promiseTimeout is required — it has no serde default', async () => {
+		// src/types.rs:625-627. Omitting it is a deserialization failure.
+		const { id, cron, promiseId } = ok();
+		const { status, body } = await rpc('schedule.create', { id, cron, promiseId });
+		assert.equal(status, 400);
+		assert.match(body.data, /promiseTimeout/);
+	});
+
+	test('a zero promiseTimeout is accepted — it is missing, not falsy, that fails', async () => {
+		const { status } = await rpc('schedule.create', ok({ promiseTimeout: 0 }));
+		assert.equal(status, 200);
+	});
+
+	for (const field of ['id', 'cron', 'promiseId']) {
+		test(`${field} is required`, async () => {
+			const data = ok();
+			delete data[field];
+			const { status } = await rpc('schedule.create', data);
+			assert.equal(status, 400);
+		});
+	}
+
+	test('deserialization is checked before cron validity', async () => {
+		// src/oracle.rs:1488-1527. Sending both faults must report the missing
+		// field, not the bad cron — the order is part of the contract, and a
+		// handler that checked cron first would still "reject both" while
+		// reporting the wrong reason.
+		const { id, promiseId } = ok();
+		const { status, body } = await rpc('schedule.create', {
+			id,
+			cron: 'not-a-cron',
+			promiseId
+		});
+		assert.equal(status, 400);
+		assert.match(body.data, /promiseTimeout/);
+	});
+
+	test('an invalid cron is rejected', async () => {
+		const { status, body } = await rpc('schedule.create', ok({ cron: 'not-a-cron' }));
+		assert.equal(status, 400);
+		assert.match(body.data, /cron/i);
+	});
+
+	test('the dialect is enforced here, not just in the UI', async () => {
+		// The handler shares one engine with the app, so the rules that make
+		// this server's cron unlike Unix cron have to hold at the HTTP edge too.
+		for (const cron of ['0 0 * * 0', '? * * * *', '0 0 L * *', '0 0 * * 8', '0 0 * * 5#2']) {
+			const { status } = await rpc('schedule.create', ok({ cron }));
+			assert.equal(status, 400, `${cron} should be rejected`);
+		}
+		for (const cron of ['0 0 * * 1', '0 0 ? * ?', '0 0 29 2 *']) {
+			const { status } = await rpc('schedule.create', ok({ cron }));
+			assert.equal(status, 200, `${cron} should be accepted`);
+		}
+	});
+
+	test('February 30th parses, is accepted, and becomes a 60-second timer', async () => {
+		// Validity and firing are separate questions. `is_valid_cron` only
+		// parses, so an expression whose day and month never coincide is
+		// registered happily and then falls through to the retry path — the
+		// same silent bomb as a bounded year, from a different direction.
+		const { status, body } = await rpc('schedule.create', ok({ cron: '0 0 30 2 *' }));
+		assert.equal(status, 200);
+		assert.equal(body.data.schedule.nextRunAt - body.data.schedule.createdAt, 60_000);
+	});
+
+	test('nextRunAt is computed from the cron, not a fixed offset', async () => {
+		// Was `now + 3_600_000` regardless of the expression, which made a
+		// fixture-backed preview indistinguishable from a wrong one. Expected
+		// value computed here from the returned createdAt, not from cron.js.
+		const { body } = await rpc('schedule.create', ok({ cron: '0 0 1 1 *' }));
+		const s = body.data.schedule;
+		const d = new Date(s.createdAt);
+		const expected = Date.UTC(d.getUTCFullYear() + 1, 0, 1, 0, 0, 0);
+		assert.equal(s.nextRunAt, expected);
+		assert.notEqual(s.nextRunAt - s.createdAt, 3_600_000);
+	});
+
+	test('a bounded year is accepted and silently becomes a 60-second timer', async () => {
+		// The trap in full: 200, a registered schedule, and a once-a-year
+		// expression that fires every minute forever. The fixture has to
+		// reproduce it or it is not modelling the server.
+		const { status, body } = await rpc('schedule.create', ok({ cron: '0 0 0 1 1 * 2030' }));
+		assert.equal(status, 200);
+		const s = body.data.schedule;
+		assert.equal(s.nextRunAt - s.createdAt, 60_000);
+	});
+
+	test('a year outside 1970-2100 is rejected', async () => {
+		for (const year of ['1969', '2101', '3000', '1969-1971', '2100-2101', '?']) {
+			const { status } = await rpc('schedule.create', ok({ cron: `0 0 0 1 1 * ${year}` }));
+			assert.equal(status, 400, `year ${year} should be rejected`);
+		}
+	});
+
+	test('a duplicate id returns the existing record and discards the submission', async () => {
+		// src/oracle.rs:1501-1508 — 200 with the pre-existing record, and
+		// nothing in the envelope says so. Every submitted field is dropped,
+		// which is why the client compares all five rather than just the cron.
+		const first = ok({ cron: '0 2 * * *', promiseTimeout: 60_000 });
+		await rpc('schedule.create', first);
+
+		const resubmit = {
+			...first,
+			cron: '0 5 * * *',
+			promiseId: 'different-{{.timestamp}}',
+			promiseTimeout: 999_000,
+			promiseParam: { data: 'aGVsbG8=' },
+			promiseTags: { 'resonate:target': 'http://elsewhere' }
+		};
+		const { status, body } = await rpc('schedule.create', resubmit);
+
+		assert.equal(status, 200, 'not a 409');
+		const s = body.data.schedule;
+		assert.equal(s.cron, first.cron);
+		assert.equal(s.promiseId, first.promiseId);
+		assert.equal(s.promiseTimeout, first.promiseTimeout);
+		assert.deepEqual(s.promiseTags, first.promiseTags);
+		assert.deepEqual(s.promiseParam, first.promiseParam);
+	});
+});
+
+describe('schedule.delete', () => {
+	test('returns 200 with an empty object, not 204', async () => {
+		// server.rs:2445-2452. A client written against 204 reads this as a
+		// failure, and one written against a body reads 204 as malformed.
+		const id = `d-${++corrCounter}`;
+		await rpc('schedule.create', {
+			id,
+			cron: '0 2 * * *',
+			promiseId: 'p-{{.timestamp}}',
+			promiseTimeout: 60_000
+		});
+
+		const { status, body } = await rpc('schedule.delete', { id });
+		assert.equal(status, 200);
+		assert.deepEqual(body.data, {});
+
+		const after = await rpc('schedule.get', { id });
+		assert.equal(after.status, 404);
+	});
+
+	test('deleting an unknown id is a 404', async () => {
+		const { status } = await rpc('schedule.delete', { id: 'never-existed' });
+		assert.equal(status, 404);
+	});
+});
+
+describe('schedule.search filtering and paging', () => {
+	const TAG = 'search-fixture';
+
+	before(async () => {
+		for (const n of ['a', 'b', 'c', 'd']) {
+			await rpc('schedule.create', {
+				id: `srch-${n}`,
+				cron: '0 2 * * *',
+				promiseId: 'p-{{.timestamp}}',
+				promiseTimeout: 60_000,
+				promiseTags: { suite: TAG }
+			});
+		}
+	});
+
+	test('filters on promiseTags, which is where a schedule keeps its tags', async () => {
+		// A ScheduleRecord has no top-level `tags` field, so a filter reading
+		// `s.tags` matches nothing and silently returns everything unfiltered.
+		const { body } = await rpc('schedule.search', { tags: { suite: TAG } });
+		assert.equal(body.data.schedules.length, 4);
+		assert.ok(body.data.schedules.every((s) => s.promiseTags.suite === TAG));
+	});
+
+	test('tag values are exact, not globbed', async () => {
+		const { body } = await rpc('schedule.search', { tags: { suite: 'search-*' } });
+		assert.equal(body.data.schedules.length, 0);
+	});
+
+	test('pages by id ascending and omits the cursor on the last page', async () => {
+		const first = await rpc('schedule.search', { tags: { suite: TAG }, limit: 3 });
+		assert.deepEqual(
+			first.body.data.schedules.map((s) => s.id),
+			['srch-a', 'srch-b', 'srch-c']
+		);
+		assert.equal(first.body.data.cursor, 'srch-c');
+
+		const second = await rpc('schedule.search', {
+			tags: { suite: TAG },
+			limit: 3,
+			cursor: first.body.data.cursor
+		});
+		assert.deepEqual(
+			second.body.data.schedules.map((s) => s.id),
+			['srch-d']
+		);
+		assert.equal('cursor' in second.body.data, false);
+	});
+
+	test('limit is validated the same way as on promises', async () => {
+		assert.equal((await rpc('schedule.search', { limit: 0 })).status, 400);
+		assert.equal((await rpc('schedule.search', { limit: -1 })).status, 400);
+		assert.equal((await rpc('schedule.search', { limit: 1.5 })).status, 400);
+		assert.equal((await rpc('schedule.search', { limit: MAX_SEARCH_LIMIT + 1 })).status, 400);
+		assert.equal((await rpc('schedule.search', { limit: MAX_SEARCH_LIMIT })).status, 200);
 	});
 });
 
