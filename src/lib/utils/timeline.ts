@@ -1,12 +1,13 @@
 import type { TreeNode } from './tree';
-import type { Promise } from '$lib/api/client';
+import type { PromiseRecord, PromiseState } from '$lib/api/client';
 import { flattenTree, promiseLabel } from './tree';
+import { decodeValue } from '$lib/api/client';
 
 export interface TimelineBar {
 	id: string;
 	label: string;
 	role: string;
-	state: string;
+	state: PromiseState;
 	startTime: number;
 	endTime: number | null;
 	depth: number;
@@ -40,12 +41,12 @@ export function treeToTimelineData(root: TreeNode): TimelineData {
 	const now = Date.now();
 
 	for (const node of allNodes) {
-		const start = node.promise.createdOn;
-		const end = node.promise.completedOn ?? (node.promise.state === 'PENDING' ? now : null);
+		const start = node.promise.createdAt;
+		// A pending promise has no end, so it runs to "now" — that is what makes
+		// a stuck bar visibly keep growing.
+		const end = node.promise.settledAt ?? (node.promise.state === 'pending' ? now : null);
 
-		if (start != null) {
-			minTime = Math.min(minTime, start);
-		}
+		minTime = Math.min(minTime, start);
 		if (end != null) {
 			maxTime = Math.max(maxTime, end);
 		}
@@ -77,9 +78,8 @@ export function treeToTimelineData(root: TreeNode): TimelineData {
 			label: createTimelineLabel(node.promise, role),
 			role,
 			state: node.promise.state,
-			startTime: node.promise.createdOn ?? minTime,
-			endTime:
-				node.promise.completedOn ?? (node.promise.state === 'PENDING' ? now : minTime),
+			startTime: node.promise.createdAt,
+			endTime: node.promise.settledAt ?? (node.promise.state === 'pending' ? now : minTime),
 			depth,
 			y: 0 // Will be assigned by lane algorithm
 		});
@@ -107,17 +107,14 @@ function getRoleFromTags(tags?: Record<string, string>): string {
  * Extracts function name from promise param data.
  * Returns undefined if not available or parsing fails.
  */
-function extractFunctionName(p: Promise): string | undefined {
-	if (p.param?.data) {
-		try {
-			const decoded = atob(p.param.data);
-			const paramData = JSON.parse(decoded);
-			if (paramData?.func) {
-				return paramData.func;
-			}
-		} catch {
-			// Ignore parse/decode errors
-		}
+function extractFunctionName(p: PromiseRecord): string | undefined {
+	const decoded = decodeValue(p.param);
+	if (decoded === null) return undefined;
+	try {
+		const paramData = JSON.parse(decoded);
+		if (paramData?.func) return paramData.func;
+	} catch {
+		// Not JSON, or not an invoke payload — no function name to show.
 	}
 	return undefined;
 }
@@ -126,7 +123,7 @@ function extractFunctionName(p: Promise): string | undefined {
  * Creates a display label for a promise in the timeline.
  * Format: "ROLE funcName" or just "label" for root
  */
-function createTimelineLabel(p: Promise, role: string): string {
+function createTimelineLabel(p: PromiseRecord, role: string): string {
 	const funcName = extractFunctionName(p);
 
 	if (funcName && role !== 'root') {

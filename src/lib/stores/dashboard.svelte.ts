@@ -1,14 +1,15 @@
 import {
-	searchPromisesWithCursor,
+	searchPromises,
 	searchSchedules,
-	type Promise,
-	type Schedule
+	ApiError,
+	type PromiseRecord,
+	type ScheduleRecord
 } from '$lib/api/client';
 import { computeStats, getRecentFailures, getActivePending, type PromiseStats } from '$lib/utils/stats';
 
 class DashboardStore {
-	promises: Promise[] = $state([]);
-	schedules: Schedule[] = $state([]);
+	promises: PromiseRecord[] = $state([]);
+	schedules: ScheduleRecord[] = $state([]);
 	stats: PromiseStats = $state({
 		total: 0,
 		pending: 0,
@@ -19,10 +20,21 @@ class DashboardStore {
 		throughputPerMin: 0,
 		errorRate: 0
 	});
-	recentFailures: Promise[] = $state([]);
-	activePending: Promise[] = $state([]);
+	recentFailures: PromiseRecord[] = $state([]);
+	activePending: PromiseRecord[] = $state([]);
 	loading = $state(true);
-	error: string | null = $state(null);
+	error = $state<ApiError | null>(null);
+	/**
+	 * How many promises the figures below were computed from.
+	 *
+	 * Every number on the dashboard is counted client-side over one page of
+	 * search results, because `/metrics` exposes API traffic rather than
+	 * promise counts by state. The UI says "sampled from N" rather than
+	 * implying a server-wide total.
+	 */
+	sampleSize = $state(0);
+	/** True when the server had more promises than this sample covers. */
+	sampleTruncated = $state(false);
 
 	private pollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -30,24 +42,23 @@ class DashboardStore {
 		this.loading = true;
 		this.error = null;
 		try {
-			// Fetch recent promises (last 100 for stats - API limit)
-			const promiseResult = await searchPromisesWithCursor({
-				id: '*',
-				limit: 100,
-				sortId: -1 // Most recent first
-			});
+			// One page only. There is no sort parameter, so this is the first
+			// 100 promises by ID — not the most recent 100, whatever the old
+			// `sortId: -1` implied.
+			const promiseResult = await searchPromises({ limit: 100 });
 			this.promises = promiseResult.promises;
+			this.sampleSize = promiseResult.promises.length;
+			this.sampleTruncated = !!promiseResult.cursor;
 
-			// Fetch schedules count
-			const scheduleList = await searchSchedules('*', 100);
-			this.schedules = scheduleList;
+			const scheduleResult = await searchSchedules({ limit: 100 });
+			this.schedules = scheduleResult.schedules;
 
 			// Compute stats
 			this.stats = computeStats(this.promises);
 			this.recentFailures = getRecentFailures(this.promises, 10);
 			this.activePending = getActivePending(this.promises, 5);
 		} catch (e) {
-			this.error = e instanceof Error ? e.message : String(e);
+			this.error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
 		} finally {
 			this.loading = false;
 		}

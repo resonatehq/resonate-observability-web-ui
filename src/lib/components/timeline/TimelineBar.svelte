@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { timeToX } from '$lib/utils/timeline';
 	import type { TimelineBar } from '$lib/utils/timeline';
+	import type { PromiseState } from '$lib/api/client';
+	import { stateColor, toSubtreeStatus } from '$lib/utils/state';
 
 	interface Props {
 		bar: TimelineBar;
@@ -16,61 +18,57 @@
 	let x2 = $derived(timeToX(bar.endTime ?? maxTime, minTime, maxTime, width));
 	let barWidth = $derived(Math.max(x2 - x, 2)); // Minimum 2px for visibility
 
-	function barColor(state: string): string {
-		switch (state) {
-			case 'RESOLVED':
-				return 'var(--green)';
-			case 'PENDING':
-				return 'var(--yellow)';
-			case 'REJECTED':
-			case 'REJECTED_CANCELED':
-			case 'REJECTED_TIMEDOUT':
-				return 'var(--red)';
-			default:
-				return 'var(--muted)';
-		}
-	}
+	const barColor = stateColor;
 
 	function roleColor(role: string): string {
 		switch (role) {
 			case 'rpc':
 				return 'var(--secondary)';
 			case 'run':
-				return '#a855f7';
+				return 'var(--role-run)';
 			case 'sleep':
-				return 'var(--muted)';
+				return 'var(--text-muted)';
 			default:
 				return 'var(--text)';
 		}
 	}
 
-	// Use high-contrast text color based on bar state for better readability
-	function textColor(state: string): string {
-		switch (state) {
-			case 'RESOLVED':
-				// White text on green background for better contrast
-				return '#ffffff';
-			case 'PENDING':
-				// Dark text on yellow background
-				return '#1a1d24';
-			case 'REJECTED':
-			case 'REJECTED_CANCELED':
-			case 'REJECTED_TIMEDOUT':
-				// White text on red background
-				return '#ffffff';
-			default:
-				return 'var(--text)';
-		}
+	/**
+	 * Contrast against the bar fill, which is what `barColor` just painted.
+	 *
+	 * This was two hardcoded values picked for the old dark-only palette, so the
+	 * light theme got whichever one happened to be wrong. Each state now carries
+	 * its own `-on` token, chosen per theme against that state's actual mark —
+	 * every pair clears 4.5:1.
+	 */
+	function textColor(state: PromiseState): string {
+		return `var(--status-${toSubtreeStatus(state)}-on)`;
 	}
 
-	let isPending = $derived(bar.state === 'PENDING');
+	let isPending = $derived(bar.state === 'pending');
 
 	function handleClick() {
 		onClick?.(bar.id);
 	}
+
+	function handleKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			onClick?.(bar.id);
+		}
+	}
 </script>
 
-<g class="timeline-bar" class:pending={isPending} onclick={handleClick} style="cursor: pointer;">
+<g
+	class="timeline-bar"
+	class:pending={isPending}
+	role="button"
+	tabindex="0"
+	aria-label="{bar.label} ({bar.state})"
+	onclick={handleClick}
+	onkeydown={handleKeydown}
+	style="cursor: pointer;"
+>
 	<!-- Bar rect -->
 	<rect
 		{x}

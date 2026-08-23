@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { Promise } from '$lib/api/client';
+	import type { PromiseRecord } from '$lib/api/client';
 	import Badge from './Badge.svelte';
 
 	interface Props {
-		promises: Promise[];
+		promises: PromiseRecord[];
 	}
 
 	let { promises }: Props = $props();

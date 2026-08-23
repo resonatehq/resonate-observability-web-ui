@@ -1,60 +1,177 @@
-/* Import Inter font (Resonate brand typeface) */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Inter (Resonate brand typeface), self-hosted from static/fonts.
+   An operator console has to run on air-gapped and on-prem installs, so it must
+   not block first paint on a third-party CDN. Vendored from Google Fonts:
+   Inter v20 variable, latin + latin-ext subsets. */
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('/fonts/inter-latin-ext.woff2') format('woff2');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
-/* Resonate Brand Colors - Dark Mode (default) */
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url('/fonts/inter-latin.woff2') format('woff2');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/*
+ * Resonate brand tokens.
+ *
+ * Light is the default (`:root`), per the brand's light-by-default rule, so the
+ * correct surfaces are in place before any JS runs. Dark is the override.
+ *
+ * Surfaces and accents are the values that ship on resonatehq.io
+ * (public/css/style.css `--c-*`). The status scale below is derived from the
+ * teal / plum / ember ramps in resonate-preset.ts — see
+ * resonate-brand-design/SKILL.md, "Status scale", for the derivation and the
+ * measured contrast / colour-vision numbers.
+ */
 :root {
-	--dark: #080A0E;             /* Primary background */
-	--secondary: #1EE3CF;        /* Brand accent (teal) */
-	--primary: #E4E7EB;          /* Body text on dark */
-	--muted: #94A3B8;            /* Muted text */
+	/* Brand surfaces — warm neutrals, not cool slate */
+	--bg: #FAFAF7;
+	--bg-surface: #FFFFFF;
+	--bg-surface-hover: #F0EFEB;
+	--border: #DCDAD4;
+	--text: #0F1115;
+	--text-muted: #4A5568;
 
-	--bg: var(--dark);
-	--bg-surface: #13151a;
-	--bg-surface-hover: #1a1d24;
-	--border: #2a2d3a;
-	--text: var(--primary);
-	--text-muted: var(--muted);
+	/* Brand signature. Teal is the interaction colour: links, focus, selection.
+	   Light mode uses teal-800 as text — teal-400 (#1EE3CF) is 1.55:1 on light
+	   and is a named brand anti-pattern. `-vivid` is for fills and focus rings,
+	   never for text on a light surface. */
+	--secondary: #0A6B61;
+	--secondary-vivid: #1EE3CF;
+	--secondary-fill: #0FB3A1;
+	--on-accent: #FAFAF7;
 
-	/* Status colors */
-	--green: #22c55e;
-	--green-bg: rgba(34, 197, 94, 0.1);
-	--yellow: #eab308;
-	--yellow-bg: rgba(234, 179, 8, 0.1);
-	--red: #ef4444;
-	--red-bg: rgba(239, 68, 68, 0.1);
-	--gray: #6b7280;
+	/*
+	 * Status scale — five states, reserved meaning.
+	 *
+	 *   -mark  solid hue: donut segment, graph node, timeline bar, minimap
+	 *   -fg    badge label text
+	 *   -bg    badge pill fill (a tint of -mark over the page surface)
+	 *
+	 * Identity is carried by the mark and the pill, never by text colour alone;
+	 * every badge also carries its label, which is the mandated relief channel.
+	 *
+	 * Worst-case separation in this mode: ΔE 11.8 under protanopia/deuteranopia,
+	 * 16.5 under normal vision (OKLab ×100, Machado-Oliveira-Fernandes at 1.0).
+	 */
+	--status-resolved: #0FB3A1;         /* teal-600 */
+	--status-resolved-fg: #115E59;      /* teal-800 — 6.43:1 on its pill */
+	--status-resolved-bg: rgba(15, 179, 161, 0.13);
+	--status-resolved-on: #0F1115;      /* label on the solid mark — 7.18:1 */
+
+	--status-pending: #D97706;          /* ember, mid */
+	--status-pending-fg: #92400E;       /* ember-600 — 5.93:1 on its pill */
+	--status-pending-bg: rgba(217, 119, 6, 0.13);
+	--status-pending-on: #0F1115;       /* 5.93:1 */
+	/* Ring on a pulsing pending graph node. The brand keeps true glow effects to
+	   dark mode, so light gets a tighter, flatter ring rather than a halo. */
+	--status-pending-glow: rgba(217, 119, 6, 0.30);
+
+	--status-rejected: #831843;         /* plum-700 — 7.33:1 on its pill */
+	--status-rejected-fg: #831843;
+	--status-rejected-bg: rgba(131, 24, 67, 0.13);
+	--status-rejected-on: #FAFAF7;      /* 9.23:1 */
+
+	/* Timed out is a timing outcome, not a crash: it stays in the ember family
+	   with pending, separated by lightness, and never reads as the failure hue. */
+	--status-timedout: #451A03;         /* ember-900 — 11.10:1 on its pill */
+	--status-timedout-fg: #451A03;
+	--status-timedout-bg: rgba(69, 26, 3, 0.13);
+	--status-timedout-on: #FAFAF7;      /* 14.32:1 */
+
+	/* Canceled was a decision, not a fault — so it is the one achromatic state.
+	   Warm neutral, not the brand's bright-gray ramp: that ramp turns blue below
+	   step 300 and collapses into plum under protanopia (ΔE 1.3). */
+	--status-canceled: #75716D;
+	--status-canceled-fg: #57534B;      /* 6.25:1 on its pill */
+	--status-canceled-bg: rgba(117, 113, 109, 0.13);
+	--status-canceled-on: #FAFAF7;      /* 4.63:1 */
+
+	/* Soft teal washes for selected/active rows and non-status role chips. */
+	--secondary-bg: rgba(15, 179, 161, 0.13);
+	--secondary-bg-soft: rgba(15, 179, 161, 0.08);
 
 	--sidebar-width: 240px;
 	--font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
 
 	/* Graph visualization */
-	--node-bg: #1a1d24;
-	--node-border: #2a2d3a;
-	--edge-default: #3a3d4a;
+	--node-bg: #FFFFFF;
+	--node-border: #DCDAD4;
+	--edge-default: #B5B2AB;
+	--minimap-mask: rgba(15, 17, 21, 0.12);
+	--graph-dots: #DCDAD4;
+
+	/* Non-status accent, for the "run" role in the tree and timeline. Plum is
+	   the brand's festive primary; this used to be stock Tailwind purple. */
+	--role-run: #9B1348;
+	--role-run-bg: rgba(155, 19, 72, 0.12);
 }
 
-/* Light Mode */
-[data-theme='light'] {
-	--bg: #FFFFFF;
-	--bg-surface: #F8FAFC;
-	--bg-surface-hover: #F1F5F9;
-	--border: #E2E8F0;
-	--text: #0F172A;
-	--text-muted: #64748B;
+/* Dark mode. Fully supported, not an afterthought — but the override, not the
+   default. Plum and ember lift to the "champagne" interpretation that ships on
+   resonatehq.io rather than the darker values in the brand doc. */
+[data-theme='dark'] {
+	--bg: #080A0E;
+	--bg-surface: #0F1115;
+	--bg-surface-hover: #1A1E26;
+	--border: #2A2F3A;
+	--text: #E4E7EB;
+	--text-muted: #94A3B8;
 
-	/* Status colors adjusted for light background */
-	--green: #16a34a;
-	--green-bg: rgba(22, 163, 74, 0.1);
-	--yellow: #ca8a04;
-	--yellow-bg: rgba(202, 138, 4, 0.1);
-	--red: #dc2626;
-	--red-bg: rgba(220, 38, 38, 0.1);
-	--gray: #6b7280;
+	--secondary: #1EE3CF;
+	--secondary-vivid: #1EE3CF;
+	--secondary-fill: #1EE3CF;
+	--on-accent: #080A0E;
 
-	/* Graph visualization for light mode */
-	--node-bg: #FFFFFF;
-	--node-border: #E2E8F0;
-	--edge-default: #CBD5E1;
+	/* Worst-case separation in this mode: ΔE 8.1 CVD, 15.2 normal vision. */
+	/* Every dark-mode mark is light, so every label on a solid mark is ink. */
+	--status-resolved: #6EE7B7;         /* teal-300 */
+	--status-resolved-fg: #6EE7B7;      /* 9.76:1 on its pill */
+	--status-resolved-bg: rgba(110, 231, 183, 0.15);
+	--status-resolved-on: #0F1115;      /* 12.40:1 */
+
+	--status-pending: #FCD34D;          /* ember-300, champagne gold */
+	--status-pending-fg: #FCD34D;       /* 10.20:1 on its pill */
+	--status-pending-bg: rgba(252, 211, 77, 0.15);
+	--status-pending-on: #0F1115;       /* 13.11:1 */
+	--status-pending-glow: rgba(252, 211, 77, 0.30);
+
+	--status-rejected: #EC4899;         /* site --c-plum-vivid */
+	--status-rejected-fg: #EC4899;      /* 4.90:1 on its pill */
+	--status-rejected-bg: rgba(236, 72, 153, 0.15);
+	--status-rejected-on: #0F1115;      /* 5.36:1 */
+
+	--status-timedout: #D88917;         /* ember, between 400 and 500 */
+	--status-timedout-fg: #D88917;      /* 5.92:1 on its pill */
+	--status-timedout-bg: rgba(216, 137, 23, 0.15);
+	--status-timedout-on: #0F1115;      /* 6.76:1 */
+
+	--status-canceled: #B5B2AB;
+	--status-canceled-fg: #B5B2AB;      /* 7.42:1 on its pill */
+	--status-canceled-bg: rgba(181, 178, 171, 0.15);
+	--status-canceled-on: #0F1115;      /* 8.93:1 */
+
+	--secondary-bg: rgba(30, 227, 207, 0.15);
+	--secondary-bg-soft: rgba(30, 227, 207, 0.10);
+
+	/* Graph visualization for dark mode */
+	--node-bg: #1A1E26;
+	--node-border: #2A2F3A;
+	--edge-default: #3A3F4A;
+	--minimap-mask: rgba(8, 10, 14, 0.7);
+	--graph-dots: #1A1E26;
+
+	--role-run: #F472B6;
+	--role-run-bg: rgba(244, 114, 182, 0.15);
 }
 
 * {
@@ -112,10 +229,14 @@ a:hover {
 	border-color: var(--secondary);
 }
 
+/* Fill is `--secondary`, not `--secondary-fill`: this button carries a label, so
+   it needs 4.5:1 against it. Light teal-600 fill is 2.52:1 on a light label and
+   would fail; teal-800 gives 6.11:1. `--secondary-fill` stays for fills with no
+   text on them. */
 .btn-primary {
 	background: var(--secondary);
 	border-color: var(--secondary);
-	color: var(--dark);
+	color: var(--on-accent);
 	font-weight: 600;
 }
 
@@ -140,24 +261,31 @@ a:hover {
 	letter-spacing: 0.03em;
 }
 
-.badge-green {
-	color: var(--green);
-	background: var(--green-bg);
+/* Status badges are named for the state, not the colour — the colour is a
+   decision the brand can revise; the state is not. */
+.badge-resolved {
+	color: var(--status-resolved-fg);
+	background: var(--status-resolved-bg);
 }
 
-.badge-yellow {
-	color: var(--yellow);
-	background: var(--yellow-bg);
+.badge-pending {
+	color: var(--status-pending-fg);
+	background: var(--status-pending-bg);
 }
 
-.badge-red {
-	color: var(--red);
-	background: var(--red-bg);
+.badge-rejected {
+	color: var(--status-rejected-fg);
+	background: var(--status-rejected-bg);
 }
 
-.badge-gray {
-	color: var(--gray);
-	background: rgba(107, 114, 128, 0.1);
+.badge-timedout {
+	color: var(--status-timedout-fg);
+	background: var(--status-timedout-bg);
+}
+
+.badge-canceled {
+	color: var(--status-canceled-fg);
+	background: var(--status-canceled-bg);
 }
 
 .badge-lg {
@@ -219,15 +347,15 @@ a:hover {
 }
 
 .alert-error {
-	background: var(--red-bg);
-	color: var(--red);
-	border: 1px solid rgba(239, 68, 68, 0.2);
+	background: var(--status-rejected-bg);
+	color: var(--status-rejected-fg);
+	border: 1px solid var(--status-rejected-bg);
 }
 
 .alert-warning {
-	background: var(--yellow-bg);
-	color: var(--yellow);
-	border: 1px solid rgba(234, 179, 8, 0.2);
+	background: var(--status-pending-bg);
+	color: var(--status-pending-fg);
+	border: 1px solid var(--status-pending-bg);
 }
 
 /* Code blocks */

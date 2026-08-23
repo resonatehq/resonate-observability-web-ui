@@ -1,19 +1,19 @@
 <script lang="ts">
-	import type { Promise } from '$lib/api/client';
+	import type { PromiseRecord } from '$lib/api/client';
 	import { formatDuration } from '$lib/utils/tree';
 
 	interface Props {
-		workflows: Promise[];
+		workflows: PromiseRecord[];
 	}
 
 	let { workflows }: Props = $props();
 
-	function getRunningTime(p: Promise): number {
-		if (!p.createdOn) return 0;
-		return Date.now() - p.createdOn;
+	function getRunningTime(p: PromiseRecord): number {
+		if (!p.createdAt) return 0;
+		return Date.now() - p.createdAt;
 	}
 
-	function getLabel(p: Promise): string {
+	function getLabel(p: PromiseRecord): string {
 		return p.tags?.['resonate:invoke'] || p.id;
 	}
 </script>
@@ -111,7 +111,7 @@
 	}
 
 	.progress-bar.pending {
-		background: var(--yellow);
+		background: var(--status-pending);
 		animation: pulse-glow 2s ease-in-out infinite;
 	}
 

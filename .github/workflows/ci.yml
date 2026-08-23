@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # svelte-check must stay at zero. The toolchain upgrade brought it from
+      # 9 errors / 4 warnings to 0/0; this gate is what keeps it there.
+      - name: Typecheck
+        run: npm run check
+
+      # The protocol contract. These encode what the server actually does —
+      # snake_case states, the renamed fields, exact-match filters, the CORS
+      # preflight rules — so a migration that churns ~100 string literals has
+      # something to fail against.
+      - name: Protocol conformance (mock fixture)
+        run: npm test
+
+      - name: Build
+        run: npm run build

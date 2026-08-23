@@ -140,7 +140,7 @@
 	.nav-link.active {
 		color: var(--text);
 		background: var(--bg-surface-hover);
-		border-right: 2px solid var(--primary);
+		border-right: 2px solid var(--text);
 	}
 
 	.sidebar-footer {
@@ -180,7 +180,7 @@
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
-		background: var(--green);
+		background: var(--status-resolved);
 		flex-shrink: 0;
 	}
 

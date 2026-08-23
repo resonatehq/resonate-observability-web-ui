@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { searchPromisesWithCursor, getPromise, type Promise } from '$lib/api/client';
+	import { searchPromises, getPromise, ApiError, type PromiseRecord } from '$lib/api/client';
 	import {
 		buildTree,
 		fetchTreePromises,
@@ -15,11 +15,12 @@
 	import WorkflowGraph from '$lib/components/graph/WorkflowGraph.svelte';
 	import TimelineView from '$lib/components/timeline/TimelineView.svelte';
 	import Badge from '$lib/components/Badge.svelte';
+	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
 
-	let root: TreeNode | null = $state(null);
-	let error: string | null = $state(null);
+	let root = $state<TreeNode | null>(null);
+	let error = $state<ApiError | null>(null);
 	let loading = $state(true);
-	let selectedPromise: Promise | null = $state(null);
+	let selectedPromise = $state<PromiseRecord | null>(null);
 	let direction: 'TB' | 'LR' = $state('TB');
 	let activeTab: 'graph' | 'timeline' | 'list' = $state('graph');
 	let totalSteps = $state(0);
@@ -31,9 +32,7 @@
 			loading = true;
 		}
 		try {
-			const promises = await fetchTreePromises(rootId, async (params) =>
-				searchPromisesWithCursor({ ...params, id: params.id || '*' })
-			);
+			const promises = await fetchTreePromises(rootId, (params) => searchPromises(params));
 
 			// Make sure root promise is included
 			if (!promises.find((p) => p.id === rootId)) {
@@ -52,7 +51,7 @@
 			}
 			error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
 		} finally {
 			loading = false;
 		}
@@ -63,7 +62,7 @@
 		let completed = 0;
 		function walk(n: TreeNode) {
 			total++;
-			if (n.promise.state === 'RESOLVED') completed++;
+			if (n.promise.state === 'resolved') completed++;
 			for (const child of n.children) walk(child);
 		}
 		walk(node);
@@ -159,7 +158,7 @@
 	</div>
 
 	{#if error}
-		<div class="alert alert-error">{error}</div>
+		<ErrorPanel {error} while="loading this workflow" />
 	{/if}
 
 	<div class="tab-bar">
@@ -228,8 +227,8 @@
 									</td>
 									<td class="mono">{dur != null ? formatDuration(dur) : '—'}</td>
 									<td class="muted">
-										{node.promise.createdOn
-											? new Date(node.promise.createdOn).toLocaleTimeString()
+										{node.promise.createdAt
+											? new Date(node.promise.createdAt).toLocaleTimeString()
 											: '—'}
 									</td>
 								</tr>
@@ -258,15 +257,13 @@
 							<dt>Duration</dt>
 							<dd class="mono">{formatDuration(computeDuration(selectedPromise)!)}</dd>
 						{/if}
-						<dt>Timeout</dt>
-						<dd class="mono">{selectedPromise.timeout}</dd>
-						{#if selectedPromise.createdOn}
-							<dt>Created</dt>
-							<dd class="mono">{new Date(selectedPromise.createdOn).toLocaleString()}</dd>
-						{/if}
-						{#if selectedPromise.completedOn}
-							<dt>Completed</dt>
-							<dd class="mono">{new Date(selectedPromise.completedOn).toLocaleString()}</dd>
+						<dt>Created</dt>
+						<dd class="mono">{new Date(selectedPromise.createdAt).toLocaleString()}</dd>
+						<dt>Times out</dt>
+						<dd class="mono">{new Date(selectedPromise.timeoutAt).toLocaleString()}</dd>
+						{#if selectedPromise.settledAt != null}
+							<dt>Settled</dt>
+							<dd class="mono">{new Date(selectedPromise.settledAt).toLocaleString()}</dd>
 						{/if}
 					</dl>
 

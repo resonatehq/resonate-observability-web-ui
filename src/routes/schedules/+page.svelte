@@ -1,32 +1,35 @@
 <script lang="ts">
-	import { searchSchedules } from '$lib/api/client';
+	import { untrack } from 'svelte';
+	import { searchSchedules, ApiError, type ScheduleRecord } from '$lib/api/client';
 	import ScheduleTable from '$lib/components/ScheduleTable.svelte';
-	import type { Schedule } from '$lib/api/client';
+	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
 
-	let query = $state('');
-	let schedules: Schedule[] = $state([]);
-	let error: string | null = $state(null);
+	let schedules: ScheduleRecord[] = $state([]);
+	let error = $state<ApiError | null>(null);
 	let loading = $state(true);
+	let cursor = $state<string | undefined>(undefined);
+	let hasMore = $state(false);
 
-	async function load() {
+	async function load(append = false) {
 		loading = true;
 		try {
-			schedules = await searchSchedules(query || '*', 50);
+			const result = await searchSchedules({
+				limit: 50,
+				cursor: append ? cursor : undefined
+			});
+			schedules = append ? [...schedules, ...result.schedules] : result.schedules;
+			cursor = result.cursor;
+			hasMore = !!result.cursor;
 			error = null;
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
 		} finally {
 			loading = false;
 		}
 	}
 
-	function handleSearch(e: SubmitEvent) {
-		e.preventDefault();
-		load();
-	}
-
 	$effect(() => {
-		load();
+		untrack(() => load(false));
 	});
 </script>
 
@@ -34,22 +37,32 @@
 	<h1>Schedules</h1>
 </div>
 
-<form class="search-bar" onsubmit={handleSearch}>
-	<input
-		type="text"
-		class="search-input"
-		placeholder="Search schedules (wildcards: *)"
-		bind:value={query}
-	/>
-	<button type="submit" class="btn btn-primary">Search</button>
-</form>
+<!--
+	No search box: `schedule.search` takes only {tags, limit, cursor}. An id
+	query would have been accepted and ignored.
+-->
 
 {#if error}
-	<div class="alert alert-error">{error}</div>
+	<ErrorPanel {error} while="loading schedules" />
 {/if}
 
-{#if loading}
+{#if loading && schedules.length === 0}
 	<div class="loading">Loading...</div>
 {:else}
 	<ScheduleTable {schedules} />
+	{#if hasMore}
+		<div class="load-more">
+			<button class="btn" onclick={() => load(true)} disabled={loading}>
+				{loading ? 'Loading...' : 'Load more'}
+			</button>
+		</div>
+	{/if}
 {/if}
+
+<style>
+	.load-more {
+		display: flex;
+		justify-content: center;
+		margin-top: 1.5rem;
+	}
+</style>

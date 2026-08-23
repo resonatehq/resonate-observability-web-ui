@@ -3,6 +3,7 @@
 	import type { NodeProps } from '@xyflow/svelte';
 	import type { GraphNodeData } from '$lib/utils/tree';
 	import { formatDuration } from '$lib/utils/tree';
+	import { stateColor, stateLabel, subtreeColor } from '$lib/utils/state';
 
 	interface Props extends NodeProps {
 		data: GraphNodeData;
@@ -10,47 +11,8 @@
 
 	let { data, id }: Props = $props();
 
-	function stateColor(state: string): string {
-		switch (state) {
-			case 'RESOLVED':
-				return 'var(--green)';
-			case 'PENDING':
-				return 'var(--yellow)';
-			case 'REJECTED':
-			case 'REJECTED_CANCELED':
-			case 'REJECTED_TIMEDOUT':
-				return 'var(--red)';
-			default:
-				return 'var(--muted)';
-		}
-	}
-
-	function subtreeColor(status: string): string {
-		switch (status) {
-			case 'resolved':
-				return 'var(--green)';
-			case 'pending':
-				return 'var(--yellow)';
-			case 'rejected':
-				return 'var(--red)';
-			default:
-				return 'var(--muted)';
-		}
-	}
-
-	function stateLabel(state: string): string {
-		switch (state) {
-			case 'REJECTED_CANCELED':
-				return 'CANCELED';
-			case 'REJECTED_TIMEDOUT':
-				return 'TIMEDOUT';
-			default:
-				return state;
-		}
-	}
-
 	let borderColor = $derived(stateColor(data.promise.state));
-	let isPending = $derived(data.promise.state === 'PENDING');
+	let isPending = $derived(data.promise.state === 'pending');
 </script>
 
 <div class="promise-node" style="border-left-color: {borderColor}" class:pending={isPending}>
@@ -91,9 +53,9 @@
 
 <style>
 	.promise-node {
-		background: var(--node-bg, #1a1d24);
-		border: 1px solid var(--node-border, #2a2d3a);
-		border-left: 3px solid var(--muted);
+		background: var(--node-bg);
+		border: 1px solid var(--node-border);
+		border-left: 3px solid var(--text-muted);
 		border-radius: 6px;
 		padding: 0.625rem 0.75rem;
 		min-width: 180px;
@@ -104,8 +66,8 @@
 	}
 
 	.promise-node:hover {
-		border-color: var(--secondary, #1ee3cf);
-		box-shadow: 0 0 0 1px var(--secondary, #1ee3cf);
+		border-color: var(--secondary);
+		box-shadow: 0 0 0 1px var(--secondary);
 	}
 
 	.promise-node.pending {
@@ -118,7 +80,7 @@
 			box-shadow: none;
 		}
 		50% {
-			box-shadow: 0 0 8px rgba(234, 179, 8, 0.3);
+			box-shadow: 0 0 8px var(--status-pending-glow);
 		}
 	}
 
@@ -132,7 +94,7 @@
 	.node-label {
 		font-size: 0.8125rem;
 		font-weight: 600;
-		color: var(--text, #e4e7eb);
+		color: var(--text);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -150,30 +112,30 @@
 	}
 
 	.type-rpc {
-		background: rgba(30, 227, 207, 0.12);
-		color: var(--secondary, #1ee3cf);
+		background: var(--secondary-bg);
+		color: var(--secondary);
 	}
 
 	.type-run {
-		background: rgba(168, 85, 247, 0.12);
-		color: #a855f7;
+		background: var(--role-run-bg);
+		color: var(--role-run);
 	}
 
 	.type-sleep {
-		background: rgba(148, 163, 184, 0.12);
-		color: var(--muted, #94a3b8);
+		background: var(--bg-surface-hover);
+		color: var(--text-muted);
 	}
 
 	.node-function {
 		margin-bottom: 0.375rem;
 		padding: 0.25rem 0.375rem;
-		background: var(--bg-surface-hover, rgba(255, 255, 255, 0.03));
+		background: var(--bg-surface-hover);
 		border-radius: 4px;
 		font-size: 0.6875rem;
 	}
 
 	.function-name {
-		color: var(--secondary, #1ee3cf);
+		color: var(--secondary);
 		font-weight: 500;
 		font-family: 'SF Mono', 'Fira Code', monospace;
 		overflow: hidden;
@@ -183,7 +145,7 @@
 	}
 
 	.sleep-duration {
-		color: var(--muted, #94a3b8);
+		color: var(--text-muted);
 		font-style: italic;
 		font-size: 0.6875rem;
 	}
@@ -203,7 +165,7 @@
 
 	.node-duration {
 		font-size: 0.6875rem;
-		color: var(--text-muted, #94a3b8);
+		color: var(--text-muted);
 		font-family: 'SF Mono', 'Fira Code', monospace;
 	}
 

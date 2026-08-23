@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Badge from './Badge.svelte';
+	import Self from './Tree.svelte';
 	import type { TreeNode } from '$lib/utils/tree';
 	import { promiseRole } from '$lib/utils/tree';
 
@@ -53,7 +54,7 @@
 
 {#if node.expanded}
 	{#each node.children as child}
-		<svelte:self node={child} depth={depth + 1} {onToggle} />
+		<Self node={child} depth={depth + 1} {onToggle} />
 	{/each}
 {/if}
 
@@ -116,22 +117,22 @@
 	}
 
 	.role-root {
-		background: rgba(30, 227, 207, 0.15);
+		background: var(--secondary-bg);
 		color: var(--secondary);
 	}
 
 	.role-rpc {
-		background: rgba(30, 227, 207, 0.1);
+		background: var(--secondary-bg-soft);
 		color: var(--secondary);
 	}
 
 	.role-run {
-		background: rgba(168, 85, 247, 0.1);
-		color: #a855f7;
+		background: var(--role-run-bg);
+		color: var(--role-run);
 	}
 
 	.role-sleep {
-		background: rgba(148, 163, 184, 0.1);
-		color: var(--muted);
+		background: var(--bg-surface-hover);
+		color: var(--text-muted);
 	}
 </style>

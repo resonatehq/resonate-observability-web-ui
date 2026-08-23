@@ -71,12 +71,6 @@
 		color: var(--text-muted);
 	}
 
-	.row-label {
-		font-size: 0.75rem;
-		fill: var(--text-muted);
-		font-weight: 500;
-	}
-
 	svg {
 		display: block;
 	}

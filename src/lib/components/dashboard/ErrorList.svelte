@@ -1,14 +1,14 @@
 <script lang="ts">
-	import type { Promise } from '$lib/api/client';
+	import type { PromiseRecord } from '$lib/api/client';
 	import Badge from '../Badge.svelte';
 
 	interface Props {
-		failures: Promise[];
+		failures: PromiseRecord[];
 	}
 
 	let { failures }: Props = $props();
 
-	function getLabel(p: Promise): string {
+	function getLabel(p: PromiseRecord): string {
 		return p.tags?.['resonate:invoke'] || p.id;
 	}
 
@@ -34,7 +34,7 @@
 						<div class="error-label" title={failure.id}>{getLabel(failure)}</div>
 						<div class="error-id mono">{failure.id}</div>
 					</div>
-					<div class="error-time">{getTimeAgo(failure.completedOn)}</div>
+					<div class="error-time">{getTimeAgo(failure.settledAt)}</div>
 				</a>
 			{/each}
 		</div>
@@ -65,7 +65,7 @@
 	}
 
 	.error-item:hover {
-		border-color: var(--red);
+		border-color: var(--status-rejected);
 		background: var(--bg-surface-hover);
 	}
 

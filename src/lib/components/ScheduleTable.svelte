@@ -1,70 +1,32 @@
 <script lang="ts">
-	import type { Schedule } from '$lib/api/client';
-	import { searchPromisesWithCursor } from '$lib/api/client';
-	import Badge from './Badge.svelte';
-	import { untrack } from 'svelte';
+	import type { ScheduleRecord } from '$lib/api/client';
 
 	interface Props {
-		schedules: Schedule[];
+		schedules: ScheduleRecord[];
 	}
 
 	let { schedules }: Props = $props();
 
-	interface ScheduleWithStatus extends Schedule {
-		lastRunStatus?: string;
-		lastRunTime?: number;
-		loading?: boolean;
-	}
-
-	let schedulesWithStatus: ScheduleWithStatus[] = $state([]);
-	let loadedScheduleIds = new Set<string>();
-
-	async function loadScheduleStatus(schedule: ScheduleWithStatus) {
-		if (loadedScheduleIds.has(schedule.id)) return;
-		loadedScheduleIds.add(schedule.id);
-
-		schedule.loading = true;
-		try {
-			// Fetch most recent promise for this schedule
-			const result = await searchPromisesWithCursor({
-				id: `${schedule.promiseId}*`,
-				limit: 1,
-				sortId: -1 // Most recent first
-			});
-
-			if (result.promises.length > 0) {
-				const latest = result.promises[0];
-				schedule.lastRunStatus = latest.state;
-				schedule.lastRunTime = latest.createdOn;
-			}
-		} catch {
-			// Silently fail for individual schedule status loads
-		} finally {
-			schedule.loading = false;
-		}
-	}
-
-	$effect(() => {
-		// Only react to changes in the schedules prop
-		const currentSchedules = schedules;
-
-		// Use untrack to prevent the effect from re-running when we modify schedulesWithStatus
-		untrack(() => {
-			schedulesWithStatus = currentSchedules.map((s) => ({ ...s, loading: true }));
-			// Load status for each schedule
-			for (const schedule of schedulesWithStatus) {
-				loadScheduleStatus(schedule);
-			}
-		});
-	});
-
+	/**
+	 * There is no "last run status" column any more, and it is not an oversight.
+	 *
+	 * Finding the promise a schedule most recently produced needs a prefix
+	 * search on `promiseId` plus a newest-first sort — the schedule's
+	 * `promiseId` is a template like `nightly-{{.timestamp}}`, not an id. The
+	 * server offers neither, and the previous implementation's request was
+	 * accepted and silently ignored, so the badge it rendered was the state of
+	 * whichever promise happened to sort first on the whole server.
+	 *
+	 * `lastRunAt` and `nextRunAt` come straight off the schedule record and are
+	 * true, so those are what this shows.
+	 */
 	function formatTime(timestamp: number | undefined): string {
-		if (!timestamp) return 'Never';
+		if (timestamp == null) return 'Never';
 		return new Date(timestamp).toLocaleString();
 	}
 </script>
 
-{#if schedulesWithStatus.length === 0}
+{#if schedules.length === 0}
 	<div class="empty-state">No schedules found.</div>
 {:else}
 	<table class="data-table">
@@ -72,29 +34,19 @@
 			<tr>
 				<th>ID</th>
 				<th>Cron</th>
-				<th>Last Run</th>
-				<th>Status</th>
-				<th>Promise ID</th>
-				<th>Description</th>
+				<th>Last run</th>
+				<th>Next run</th>
+				<th>Promise ID template</th>
 			</tr>
 		</thead>
 		<tbody>
-			{#each schedulesWithStatus as schedule}
+			{#each schedules as schedule}
 				<tr>
 					<td><a href="/schedules/{schedule.id}" class="mono schedule-link">{schedule.id}</a></td>
 					<td class="mono cron">{schedule.cron}</td>
-					<td class="mono last-run">{formatTime(schedule.lastRunTime)}</td>
-					<td>
-						{#if schedule.loading}
-							<span class="loading-status">…</span>
-						{:else if schedule.lastRunStatus}
-							<Badge state={schedule.lastRunStatus} />
-						{:else}
-							<span class="muted">—</span>
-						{/if}
-					</td>
-					<td><a href="/promises/{schedule.promiseId}" class="mono">{schedule.promiseId}</a></td>
-					<td class="description">{schedule.description ?? ''}</td>
+					<td class="mono run-time">{formatTime(schedule.lastRunAt)}</td>
+					<td class="mono run-time">{formatTime(schedule.nextRunAt)}</td>
+					<td class="mono template">{schedule.promiseId}</td>
 				</tr>
 			{/each}
 		</tbody>
@@ -118,17 +70,12 @@
 		color: var(--text-muted);
 	}
 
-	.last-run {
+	.run-time {
 		font-size: 0.8125rem;
 	}
 
-	.loading-status {
+	.template {
+		font-size: 0.8125rem;
 		color: var(--text-muted);
-		font-style: italic;
-	}
-
-	.description {
-		color: var(--text-muted);
-		font-size: 0.875rem;
 	}
 </style>

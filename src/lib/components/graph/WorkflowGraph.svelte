@@ -3,12 +3,14 @@
 		SvelteFlow,
 		Controls,
 		Background,
+		BackgroundVariant,
 		MiniMap,
 		type Node,
 		type Edge
 	} from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import PromiseNode from './PromiseNode.svelte';
+	import { subtreeColorHex, toSubtreeStatus } from '$lib/utils/state';
 	import StatusEdge from './StatusEdge.svelte';
 	import type { TreeNode, GraphNodeData, GraphEdgeData } from '$lib/utils/tree';
 	import { treeToGraphData } from '$lib/utils/tree';
@@ -60,7 +62,7 @@
 		defaultEdgeOptions={{ animated: false }}
 		onnodeclick={handleNodeClick}
 	>
-		<Background variant="dots" gap={20} size={1} color="#1a1d24" />
+		<Background variant={BackgroundVariant.Dots} gap={20} size={1} patternClass="graph-dots" />
 		{#if interactive}
 			<Controls position="bottom-right" />
 			<MiniMap
@@ -68,18 +70,9 @@
 				zoomable
 				nodeColor={(node) => {
 					const data = node.data as GraphNodeData;
-					switch (data.promise.state) {
-						case 'RESOLVED':
-							return '#22c55e';
-						case 'PENDING':
-							return '#eab308';
-						case 'REJECTED':
-						case 'REJECTED_CANCELED':
-						case 'REJECTED_TIMEDOUT':
-							return '#ef4444';
-						default:
-							return '#6b7280';
-					}
+					// Literal hex: the minimap is canvas-painted and cannot
+					// resolve CSS custom properties.
+					return subtreeColorHex(toSubtreeStatus(data.promise.state));
 				}}
 			/>
 		{/if}
@@ -90,7 +83,7 @@
 	.graph-wrapper {
 		width: 100%;
 		height: 100%;
-		background: var(--bg, #080a0e);
+		background: var(--bg);
 		border-radius: 8px;
 		overflow: hidden;
 	}
@@ -106,18 +99,22 @@
 		--xy-node-border-radius: 6px;
 		--xy-node-border: none;
 		--xy-node-box-shadow: none;
-		--xy-minimap-background-color: #13151a;
-		--xy-minimap-mask-background-color: rgba(8, 10, 14, 0.7);
-		--xy-controls-button-background-color: #13151a;
-		--xy-controls-button-color: #e4e7eb;
-		--xy-controls-button-border-color: #2a2d3a;
-		--xy-edge-stroke: #3a3d4a;
+		--xy-minimap-background-color: var(--bg-surface);
+		--xy-minimap-mask-background-color: var(--minimap-mask);
+		--xy-controls-button-background-color: var(--bg-surface);
+		--xy-controls-button-color: var(--text);
+		--xy-controls-button-border-color: var(--border);
+		--xy-edge-stroke: var(--edge-default);
 		--xy-edge-stroke-width: 2;
 		--xy-attribution-background-color: transparent;
 	}
 
 	.graph-wrapper :global(.svelte-flow__controls button:hover) {
-		background: #1a1d24;
+		background: var(--bg-surface-hover);
+	}
+
+	.graph-wrapper :global(.graph-dots) {
+		fill: var(--graph-dots);
 	}
 
 	.graph-wrapper :global(.svelte-flow__attribution) {
