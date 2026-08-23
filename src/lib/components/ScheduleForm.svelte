@@ -1,11 +1,19 @@
 <script lang="ts">
 	import {
 		createSchedule,
+		encodeValue,
 		ApiError,
 		type ScheduleRecord,
 		type CreateScheduleOutcome
 	} from '$lib/api/client';
-	import { CRON_PRESETS, DOW_OPTIONS, describeCron, nextFireTimes, formatUtc } from '$lib/utils/cron';
+	import {
+		CRON_PRESETS,
+		CRON_MAX_YEAR,
+		DOW_OPTIONS,
+		describeCron,
+		nextFireTimes,
+		formatUtc
+	} from '$lib/utils/cron';
 	import ErrorPanel from './ErrorPanel.svelte';
 
 	interface Props {
@@ -35,12 +43,26 @@
 	let duplicate = $state<ScheduleRecord | null>(null);
 
 	/**
-	 * The preview is recomputed from a clock that only advances when the form
-	 * changes, not on a timer. A ticking preview would make the three fire
-	 * times shuffle under the operator mid-read for no benefit — they are a
-	 * decision aid, not a countdown.
+	 * The preview clock, advanced on a coarse tick.
+	 *
+	 * This was captured once at init, on the reasoning that a ticking preview
+	 * would shuffle under the operator mid-read. That reasoning holds for a
+	 * per-second countdown and not for this: on any sub-hourly schedule every
+	 * time in a frozen preview is in the past within a minute, so the form's
+	 * one real feature quietly starts describing history while the operator is
+	 * still filling in the target. Recomputing on submit would not help — the
+	 * window that matters is the one before submit, while they are reading the
+	 * preview to decide.
+	 *
+	 * Fifteen seconds is slow enough that the rendered list only changes when a
+	 * fire time is actually crossed, which is the moment it SHOULD change.
 	 */
-	const now = Date.now();
+	let now = $state(Date.now());
+
+	$effect(() => {
+		const handle = setInterval(() => (now = Date.now()), 15_000);
+		return () => clearInterval(handle);
+	});
 
 	/** @param {string} hhmm */
 	function timeParts(hhmm: string): { h: number; m: number } {
@@ -142,7 +164,13 @@
 				cron,
 				promiseId: promiseId.trim(),
 				promiseTimeout,
-				promiseParam: promiseParamText.trim() === '' ? {} : JSON.parse(promiseParamText),
+				// Re-serialised through `JSON.parse` first so the payload is
+				// normalised and a syntax error surfaces here rather than being
+				// base64'd into an unreadable blob on the server.
+				promiseParam:
+					promiseParamText.trim() === ''
+						? {}
+						: encodeValue(JSON.stringify(JSON.parse(promiseParamText))),
 				promiseTags: buildTags()
 			});
 
@@ -179,11 +207,20 @@
 				<code class="mono">{duplicate.id}</code>, unchanged, and discarded what was submitted. It
 				answers 200 for this, so it is not reported as an error.
 			</p>
+			<!--
+				The timeout and target are shown because they are now compared:
+				"same schedule, new target" is a normal thing to try, and it is
+				discarded exactly as silently as a changed cron.
+			-->
 			<p class="dup-detail">
 				Existing: <code class="mono">{duplicate.cron}</code> &rarr;
-				<code class="mono">{duplicate.promiseId}</code><br />
+				<code class="mono">{duplicate.promiseId}</code>, timeout
+				<code class="mono">{duplicate.promiseTimeout}</code>, target
+				<code class="mono">{duplicate.promiseTags['resonate:target'] ?? '(none)'}</code><br />
 				Submitted: <code class="mono">{cron}</code> &rarr;
-				<code class="mono">{promiseId.trim()}</code>
+				<code class="mono">{promiseId.trim()}</code>, timeout
+				<code class="mono">{promiseTimeout}</code>, target
+				<code class="mono">{target.trim() === '' ? '(none)' : target.trim()}</code>
 			</p>
 			<p>Choose a different id, or delete the existing schedule first.</p>
 		</div>
@@ -197,8 +234,10 @@
 			bind:value={id}
 			placeholder="nightly-reconcile"
 			autocomplete="off"
+			aria-invalid={idProblem !== null}
+			aria-describedby={idProblem ? 'sched-id-error' : undefined}
 		/>
-		{#if idProblem}<p class="field-error">{idProblem}</p>{/if}
+		{#if idProblem}<p class="field-error" id="sched-id-error">{idProblem}</p>{/if}
 	</div>
 
 	<div class="field">
@@ -268,12 +307,27 @@
 		{:else}
 			<p class="preview-text">{description.text}</p>
 			<code class="mono preview-cron">{cron}</code>
-			<p class="preview-label">Next three runs</p>
+			<!--
+				When the projection runs out before three, say so. A fixed "next
+				three runs" heading over a single row reads as "this fires three
+				times and here is the first", which is the opposite of the truth.
+			-->
+			<p class="preview-label">
+				{fireTimes.truncated
+					? `Every run this will ever have (${fireTimes.times.length})`
+					: 'Next three runs'}
+			</p>
 			<ul class="preview-times">
 				{#each fireTimes.times as time}
 					<li class="mono">{formatUtc(time)}</li>
 				{/each}
 			</ul>
+			{#if fireTimes.truncated}
+				<p class="preview-note">
+					This expression has no further runs before {CRON_MAX_YEAR}, which is as far as this
+					server's cron reaches.
+				</p>
+			{/if}
 			{#if preset === 'custom'}
 				<p class="preview-warn">
 					Weekdays are <strong>1&nbsp;=&nbsp;Sunday</strong> through 7&nbsp;=&nbsp;Saturday, and
@@ -292,6 +346,7 @@
 			bind:value={target}
 			placeholder="poll://any@default"
 			autocomplete="off"
+			aria-describedby={target.trim() === '' ? 'sched-target-warning' : undefined}
 		/>
 		<p class="field-hint">
 			Written as the <code class="mono">resonate:target</code> tag — where the promise this schedule
@@ -301,7 +356,9 @@
 			accepts one and then has nowhere to deliver the work.
 		</p>
 		{#if target.trim() === ''}
-			<p class="field-error">Without a target, nothing will execute the promises this creates.</p>
+			<p class="field-error" id="sched-target-warning">
+				Without a target, nothing will execute the promises this creates.
+			</p>
 		{/if}
 	</div>
 
@@ -332,9 +389,15 @@
 	{#if showAdvanced}
 		<div class="field">
 			<label for="sched-param">Promise param (JSON)</label>
-			<textarea id="sched-param" class="search-input mono param" rows="4" bind:value={promiseParamText}
+			<textarea
+				id="sched-param"
+				class="search-input mono param"
+				rows="4"
+				bind:value={promiseParamText}
+				aria-invalid={paramProblem !== null}
+				aria-describedby={paramProblem ? 'sched-param-error' : undefined}
 			></textarea>
-			{#if paramProblem}<p class="field-error">{paramProblem}</p>{/if}
+			{#if paramProblem}<p class="field-error" id="sched-param-error">{paramProblem}</p>{/if}
 		</div>
 
 		<div class="field">
@@ -345,9 +408,11 @@
 				rows="3"
 				placeholder="team=payments"
 				bind:value={extraTagsText}
+				aria-invalid={tagsProblem !== null}
+				aria-describedby={tagsProblem ? 'sched-tags-error' : undefined}
 			></textarea>
 			<p class="field-hint">One <code class="mono">key=value</code> per line.</p>
-			{#if tagsProblem}<p class="field-error">{tagsProblem}</p>{/if}
+			{#if tagsProblem}<p class="field-error" id="sched-tags-error">{tagsProblem}</p>{/if}
 		</div>
 	{/if}
 
@@ -484,6 +549,13 @@
 		padding-left: 1.1rem;
 		font-size: 0.82rem;
 		line-height: 1.6;
+	}
+
+	.preview-note {
+		margin: 0.5rem 0 0;
+		font-size: 0.78rem;
+		line-height: 1.5;
+		color: var(--text-muted);
 	}
 
 	.preview-warn {

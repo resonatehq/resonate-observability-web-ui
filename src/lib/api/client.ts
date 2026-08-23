@@ -299,13 +299,20 @@ export interface CreateScheduleParams {
  * `duplicate` reports. Without that check the UI cheerfully reports success
  * for a schedule it did not create, running on somebody else's cron.
  *
- * Limit worth knowing: resubmitting an id with a cron and template identical
- * to the existing record is indistinguishable from a fresh create, because
- * every field matches. `createdAt` would tell us, but only by trusting the
- * browser clock against the server's, and a skewed clock would then report
- * false duplicates on genuine creates. The undetectable case is the benign
- * one — the schedule that exists is the schedule that was asked for — so
- * this trades it for not lying in the other direction.
+ * All five submitted fields are compared, not just the cron and the promise
+ * id. The server discards the whole submission, so a resubmission that keeps
+ * the cron and template but changes the timeout, the param or the target tag
+ * is just as much a silent no-op — and those are the likelier edits, since
+ * "same schedule, new target" is how someone tries to repoint one. Comparing
+ * them costs nothing and needs no clock.
+ *
+ * Limit worth knowing: resubmitting an id with a record identical in every
+ * one of those fields is indistinguishable from a fresh create. `createdAt`
+ * would tell us, but only by trusting the browser clock against the server's,
+ * and a skewed clock would then report false duplicates on genuine creates.
+ * The undetectable case is the benign one — the schedule that exists is the
+ * schedule that was asked for — so this trades it for not lying in the other
+ * direction.
  */
 export interface CreateScheduleOutcome {
 	schedule: ScheduleRecord;
@@ -325,9 +332,36 @@ export async function createSchedule(
 	});
 
 	const returned = data.schedule;
-	const duplicate = returned.cron !== params.cron || returned.promiseId !== params.promiseId;
+	const duplicate =
+		returned.cron !== params.cron ||
+		returned.promiseId !== params.promiseId ||
+		returned.promiseTimeout !== params.promiseTimeout ||
+		!sameJson(returned.promiseParam, params.promiseParam ?? {}) ||
+		!sameJson(returned.promiseTags, params.promiseTags ?? {});
 
 	return { schedule: returned, duplicate };
+}
+
+/**
+ * Key-order-insensitive structural comparison, for diffing a record the server
+ * echoed back against the one that went out. `JSON.stringify` alone would
+ * report a difference purely from key ordering.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (typeof a !== typeof b || a === null || b === null) return false;
+	if (typeof a !== 'object') return false;
+
+	if (Array.isArray(a) || Array.isArray(b)) {
+		if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+		return a.every((item, i) => sameJson(item, b[i]));
+	}
+
+	const left = a as Record<string, unknown>;
+	const right = b as Record<string, unknown>;
+	const keys = Object.keys(left);
+	if (keys.length !== Object.keys(right).length) return false;
+	return keys.every((k) => Object.hasOwn(right, k) && sameJson(left[k], right[k]));
 }
 
 /**
@@ -380,10 +414,32 @@ export async function testConnection(
 export function decodeValue(value: PromiseValue | undefined): string | null {
 	if (!value?.data) return null;
 	try {
-		return atob(value.data);
+		const binary = atob(value.data);
+		return new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
 	} catch {
 		return value.data;
 	}
+}
+
+/**
+ * The inverse of `decodeValue`, for the one place the UI sends a payload
+ * rather than reading one.
+ *
+ * `PromiseValue` is `{headers?, data?}` where `data` is base64 — it is not a
+ * free-form JSON object, and a schedule created with a bare object as its
+ * param is accepted by the server with a 200 and stored with `promiseParam`
+ * emptied to `{}`. The payload is gone, nothing reports it, and the operator
+ * is told the schedule was created.
+ *
+ * Bytes go through `TextEncoder` rather than straight into `btoa`, which is
+ * latin1-only and throws on the first accented character or emoji in a
+ * customer payload.
+ */
+export function encodeValue(text: string): PromiseValue {
+	const bytes = new TextEncoder().encode(text);
+	let binary = '';
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return { data: btoa(binary) };
 }
 
 /** Decodes and pretty-prints JSON payloads, falling back to the raw text. */
