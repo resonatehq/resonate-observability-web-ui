@@ -18,6 +18,7 @@
 
 import { createMockServer } from './server.mjs';
 import { PROTOCOL_VERSION } from './protocol.mjs';
+import { nextFireTimes } from '../src/lib/utils/cron.js';
 
 let counter = 0;
 
@@ -49,6 +50,34 @@ const rpc = (url, kind, data, opts = {}) =>
 	});
 
 const TIMEOUT_AT = 4_102_444_800_000; // 2100-01-01, so nothing times out mid-run
+
+/**
+ * The cron corpus, one entry per way the UI parser and the server have been
+ * caught disagreeing about what is legal. Verified expression by expression
+ * against a live 0.9.8 on 2026-08-24.
+ *
+ * Coarse expressions only: every one fires at most daily, so a second or two
+ * of clock skew between this process and the server cannot change the answer.
+ * Putting `* * * * *` in here would make the report flap for no signal.
+ */
+const CRON_PROBES = [
+	'0 0 * * WED-FRI', // a named range with W inside an endpoint
+	'0 0 1 JAN-JUL *', // ...and with L inside one
+	'0 0 * * MON/2', // a step after a bare name: rejected
+	'0 0 * * MON-SAT/2', // a step after a named range: accepted
+	'0 0 * * 2/2', // a step after a number: accepted
+	'0 0 * * WED-6', // a range that mixes the two spellings: rejected
+	'0 0 * * SAT-SUN', // a descending range: rejected
+	'0 0 * * L', // the operators this dialect genuinely lacks
+	'0 0 15W * *',
+	'0 0 * * 6#3',
+	'? * * * *', // `?` outside the two day fields: rejected
+	'0 0 ? * ?', // ...and in both of them at once: accepted
+	'0 0 30 2 *', // accepted, then fires every 60 seconds forever
+	'0 0 29 2 *', // fires, decades out
+	'0 0 * * 0', // 0 is not Sunday in this dialect
+	'0 2 * * *' // the happy path
+];
 const b64 = (v) => Buffer.from(JSON.stringify(v)).toString('base64');
 
 /**
@@ -251,6 +280,55 @@ export async function runProbes(url) {
 		record('schedule.keys', Object.keys(r.body.data?.schedule ?? {}).sort().join(','));
 		const s = await rpc(url, 'schedule.search', { limit: 10 });
 		record('scheduleSearch.dataShape', shape(s.body.data));
+	}
+
+	// ── schedule cron validation ─────────────────────────────────────────────
+	//
+	// The block above creates one valid schedule and compares shapes, which is
+	// blind to the class of bug that actually bites here: the fixture and the
+	// server disagreeing about which expressions are legal, and a nextRunAt
+	// that is wildly wrong but the right TYPE. `shape()` reduces a number to
+	// "number", so it can see neither. These probes take the failure paths and
+	// compare the fire time by VALUE.
+	{
+		// A fresh id per run: `schedule.create` on an existing id returns 200
+		// with the OLD record, whose nextRunAt may long since have passed —
+		// which would read as a conformance failure and be a dirty database.
+		const stamp = Date.now().toString(36);
+		let n = 0;
+		for (const expr of CRON_PROBES) {
+			n += 1;
+			const id = `conformance-cron-${stamp}-${n}`;
+			const r = await rpc(url, 'schedule.create', {
+				id,
+				cron: expr,
+				promiseId: `${id}-{{.timestamp}}`,
+				promiseTimeout: 3_600_000,
+				promiseParam: {},
+				promiseTags: { probe: 'yes' }
+			});
+
+			if (r.status >= 400) {
+				record(`cron[${expr}]`, `rejected ${r.status}`);
+				continue;
+			}
+
+			// Projected from the record's own createdAt, not from this process's
+			// clock: the mock runs a deterministic clock that is nowhere near
+			// wall time, and a real server's is its own. Both report the instant
+			// they computed nextRunAt from, so the comparison needs no clock.
+			const sched = r.body.data?.schedule;
+			const next = sched?.nextRunAt ?? null;
+			const from = sched?.createdAt ?? null;
+			const preview = from === null ? null : nextFireTimes(expr, from, 1);
+			let verdict;
+			if (next === null || from === null) verdict = 'accepted, no nextRunAt';
+			else if (preview.ok && preview.times[0] === next) verdict = 'accepted, preview exact';
+			else if (next - from === 60_000) verdict = 'accepted, 60s fallback';
+			else if (!preview.ok) verdict = 'accepted, but the UI draws no preview';
+			else verdict = `accepted, preview off by ${next - preview.times[0]}ms`;
+			record(`cron[${expr}]`, verdict);
+		}
 	}
 
 	// ── health ───────────────────────────────────────────────────────────────

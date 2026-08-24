@@ -145,12 +145,22 @@ export function normalizeCron(expr) {
  */
 function parseField(raw, spec) {
 	/** @param {string} token */
+	const isName = (token) => Boolean(spec.names) && token.toUpperCase() in (spec.names ?? {});
+
+	/** @param {string} token */
 	const resolve = (token) => {
 		const upper = token.toUpperCase();
 		if (spec.names && upper in spec.names) return spec.names[upper];
 		if (!/^\d+$/.test(token)) return NaN;
 		return Number(token);
 	};
+
+	/** The name this field spells a value with, e.g. `4` → `WED`. @param {number} value */
+	const nameOf = (value) =>
+		Object.keys(spec.names ?? {}).find((k) => (spec.names ?? {})[k] === value) ?? String(value);
+
+	/** `4 (WED)` where the field has names, plain `4` where it does not. @param {number} value */
+	const spell = (value) => (spec.names ? `${value} (${nameOf(value)})` : String(value));
 
 	const values = new Set();
 	let wildcard = true;
@@ -160,11 +170,33 @@ function parseField(raw, spec) {
 
 		// `L`, `W` and `#` parse in some cron dialects but not this one, and the
 		// server rejects them outright. Naming them beats "invalid expression".
-		if (/[LW#]/i.test(item) && !(spec.names && item.toUpperCase() in spec.names)) {
-			return {
-				ok: false,
-				error: `\`${item}\` uses L, W or # in the ${spec.label} field. This server does not support them.`
-			};
+		//
+		// Tested per TOKEN, not per comma-item. The whole-item test refused every
+		// named range with one of those letters inside an endpoint — `WED-FRI`,
+		// `MON-WED`, `JAN-JUL`, 6 of the 21 weekday ranges and 11 of the 66 month
+		// ranges — all of which a live 0.9.8 accepts, and it disabled submit while
+		// naming an operator the reader had never typed.
+		for (const token of item.split(/[-/]/)) {
+			if (isName(token)) continue;
+
+			// A name from the OTHER named field is the likelier reading of a token
+			// like `WED` in the month field, and saying "you used the W operator"
+			// there would be the same lie the whole-item test used to tell.
+			const upper = token.toUpperCase();
+			if (upper in DOW_NAMES || upper in MONTH_NAMES) {
+				const kind = upper in DOW_NAMES ? 'a day-of-week name' : 'a month name';
+				return {
+					ok: false,
+					error: `\`${token}\` is ${kind}, and this is the ${spec.label} field.`
+				};
+			}
+
+			if (/[LW#]/i.test(token)) {
+				return {
+					ok: false,
+					error: `\`${item}\` uses L, W or # in the ${spec.label} field. This server does not support them.`
+				};
+			}
 		}
 
 		const [rangePart, stepPart, ...extra] = item.split('/');
@@ -189,6 +221,8 @@ function parseField(raw, spec) {
 
 		let start;
 		let end;
+		/** Set when the two ends of a range are spelled differently — see below. */
+		let mixedSpelling = false;
 		if (rangePart === '*' || rangePart === '?') {
 			start = spec.min;
 			end = spec.max;
@@ -200,6 +234,10 @@ function parseField(raw, spec) {
 			const [a, b] = rangePart.split('-');
 			start = resolve(a);
 			end = resolve(b);
+			// The crate will not mix the two spellings in one range: `WED-6` and
+			// `2-FRI` are both 400s on 0.9.8, even though each end is valid on its
+			// own and the range ascends.
+			mixedSpelling = isName(a) !== isName(b);
 			wildcard = false;
 		} else {
 			start = resolve(rangePart);
@@ -207,15 +245,54 @@ function parseField(raw, spec) {
 			// shape Unix cron uses, and the server accepts it.
 			end = stepPart === undefined ? start : spec.max;
 			wildcard = false;
+
+			// ...but a step after a BARE NAME is a 400: `MON/2` and `JAN/2` are
+			// both rejected where `2/2` and `MON-SAT/2` are accepted. The rule is
+			// name-versus-range, not steps, and this direction is the one that
+			// matters — it is the direction where the UI draws a preview, enables
+			// submit, and hands the operator a server error.
+			if (stepPart !== undefined && isName(rangePart)) {
+				const asNumber = `${start}/${step}`;
+				const asRange = `${rangePart.toUpperCase()}-${nameOf(spec.max)}/${step}`;
+				return {
+					ok: false,
+					error:
+						`\`${item}\` puts a step after a name in the ${spec.label} field, which this ` +
+						`server rejects. Write the start as a number (\`${asNumber}\`) or give the ` +
+						`range in full (\`${asRange}\`) — both mean the same thing.`
+				};
+			}
 		}
 
 		if (Number.isNaN(start) || Number.isNaN(end)) {
 			return { ok: false, error: `\`${item}\` is not a valid ${spec.label} value.` };
 		}
-		if (start < spec.min || end > spec.max || start > end) {
+		if (start < spec.min || end > spec.max) {
 			return {
 				ok: false,
 				error: `\`${item}\` is out of range for ${spec.label} (${spec.min}-${spec.max}).`
+			};
+		}
+		if (start > end) {
+			// Worth its own message because `SAT-SUN` is a natural way to write
+			// "the weekend" and both ends ARE in range — "out of range" sent the
+			// reader looking for a number that was never the problem. The server
+			// rejects a descending range too.
+			return {
+				ok: false,
+				error:
+					`\`${item}\` runs backwards in the ${spec.label} field: it starts at ` +
+					`${spell(start)} and ends at ${spell(end)}. This server needs an ascending ` +
+					`range — list the values instead, as \`${nameOf(start)},${nameOf(end)}\`.`
+			};
+		}
+		if (mixedSpelling) {
+			return {
+				ok: false,
+				error:
+					`\`${item}\` mixes a name and a number in the ${spec.label} field. This server ` +
+					`needs both ends spelled the same way: \`${nameOf(start)}-${nameOf(end)}\` or ` +
+					`\`${start}-${end}\`.`
 			};
 		}
 
@@ -408,7 +485,11 @@ export function nextFireTimes(expr, fromMs, count = 3) {
 			if (times.length === 0) {
 				return {
 					ok: false,
-					error: `This expression never fires: the day, month and weekday it asks for never coincide between now and ${CRON_MAX_YEAR}, which is as far as this server's cron reaches.`
+					error:
+						`The day, month and weekday this asks for never coincide between now and ` +
+						`${CRON_MAX_YEAR}, which is as far as this server's cron reaches. It will not ` +
+						`quietly do nothing: the server accepts the schedule and then computes it ` +
+						`wrong, firing every 60 seconds forever instead of never.`
 				};
 			}
 			truncated = true;

@@ -211,7 +211,7 @@ test('an expression that can never fire is reported, not returned empty', () => 
 	// February 30th parses field-by-field and matches no date that exists.
 	const r = nextFireTimes('0 0 30 2 *', REF, 3);
 	assert.equal(r.ok, false);
-	assert.match(r.error, /never fires/);
+	assert.match(r.error, /never coincide/);
 });
 
 test('the fixture and the UI agree on fire times', () => {
@@ -316,8 +316,19 @@ test('the projection reaches the crate ceiling, not eight years', async (t) => {
 	await t.test('an expression that truly never fires still says so', () => {
 		const r = nextFireTimes('0 0 30 2 *', REF, 3);
 		assert.equal(r.ok, false);
-		assert.match(r.error, /never fires/);
+		assert.match(r.error, /never coincide/);
 		assert.match(r.error, /2100/);
+	});
+
+	await t.test('and says what the server will actually do instead', () => {
+		// Blocking submit is right; the old wording was the opposite of the
+		// truth. Verified against 0.9.8: `0 0 30 2 *` is accepted with a 200 and
+		// comes back with nextRunAt exactly 60_000ms out, then again, forever.
+		const r = nextFireTimes('0 0 30 2 *', REF, 3);
+		assert.equal(r.ok, false);
+		assert.match(r.error, /every 60 seconds/);
+		assert.equal(serverAcceptsCron('0 0 30 2 *'), true);
+		assert.equal(serverNextRunAt('0 0 30 2 *', REF), REF + 60_000);
 	});
 
 	await t.test('running out before `count` is reported, not silently short', () => {
@@ -465,5 +476,117 @@ test('a bounded year: the fallback and the wrong-year landing are one bug', asyn
 
 	await t.test('a wildcard year behaves normally', () => {
 		assert.equal(at('0 0 0 1 1 * *'), '2027-01-01T00:00:00.000Z');
+	});
+});
+
+test('names in a field are values, not operators', async (t) => {
+	// The `L`/`W`/`#` guard tested the whole comma-item, so any range with one
+	// of those letters inside an ENDPOINT was refused — and the refusal named an
+	// operator the reader had never typed. Every expectation below came from
+	// creating the schedule against a live 0.9.8.
+	await t.test('a named range whose endpoint contains W, L or # is accepted', () => {
+		for (const expr of ['0 0 * * WED-FRI', '0 0 * * MON-WED', '0 0 * JAN-JUL *']) {
+			assert.ok(parseCron(expr).ok, `${expr} should parse: ${parseCron(expr).error ?? ''}`);
+			assert.ok(serverAcceptsCron(expr), `${expr} should be accepted`);
+		}
+		// 0.9.8 answered 200 with these exact next fire times.
+		assert.equal(first('0 0 * * WED-FRI'), '2026-08-26T00:00:00.000Z');
+		assert.equal(first('0 0 * * MON-WED'), '2026-08-24T00:00:00.000Z');
+		assert.equal(first('0 0 * JAN-JUL *'), '2027-01-01T00:00:00.000Z');
+	});
+
+	await t.test('the operators themselves are still refused, by name', () => {
+		for (const expr of ['0 0 * * L', '0 0 15W * *', '0 0 * * 6#3', '0 0 * * TUE#1']) {
+			const r = parseCron(expr);
+			assert.equal(r.ok, false, `${expr} should not parse`);
+			assert.match(r.error, /L, W or #/, expr);
+			assert.equal(serverAcceptsCron(expr), false, `${expr} should not be accepted`);
+		}
+	});
+
+	await t.test('a lowercase name is the same name', () => {
+		assert.equal(first('0 0 * * wed-fri'), '2026-08-26T00:00:00.000Z');
+	});
+});
+
+test('a step after a bare name is a 400, and the UI has to say so first', async (t) => {
+	// The rule is name-versus-range, not steps: `MON-FRI/2` and `2/2` are both
+	// accepted, `MON/2` and `JAN/2` are both rejected. This used to draw three
+	// fire times and enable submit, which is the one direction that matters —
+	// the direction where a broken UI passes and the operator eats the error.
+	await t.test('rejected, in both named fields', () => {
+		for (const expr of ['0 0 * * MON/2', '0 0 * * SUN/2', '0 0 * JAN/2 *']) {
+			const r = parseCron(expr);
+			assert.equal(r.ok, false, `${expr} should not parse`);
+			assert.match(r.error, /step after a name/, expr);
+			assert.equal(serverAcceptsCron(expr), false, `${expr} should not be accepted`);
+			assert.equal(nextFireTimes(expr, REF, 3).ok, false, `${expr} should draw no preview`);
+		}
+	});
+
+	await t.test('the message offers two spellings the server does take', () => {
+		const r = parseCron('0 0 * * MON/2');
+		assert.equal(r.ok, false);
+		assert.match(r.error, /`2\/2`/);
+		assert.match(r.error, /`MON-SAT\/2`/);
+		// Both really are accepted, and mean the same thing.
+		assert.equal(first('0 0 * * 2/2'), first('0 0 * * MON-SAT/2'));
+		assert.equal(first('0 0 * * 2/2'), '2026-08-24T00:00:00.000Z');
+	});
+
+	await t.test('a step after a range or a number is untouched', () => {
+		for (const expr of ['0 0 * * MON-FRI/2', '0 0 * * WED-FRI/2', '0 0 * * 2/2', '0 0 * 1/2 *']) {
+			assert.ok(parseCron(expr).ok, `${expr} should parse`);
+			assert.ok(serverAcceptsCron(expr), `${expr} should be accepted`);
+		}
+	});
+});
+
+test('a range has to ascend, and spell both ends the same way', async (t) => {
+	// Two more UI-passes-server-400s, found while pinning the two above.
+	await t.test('a mixed name/number range is refused, with both spellings offered', () => {
+		for (const expr of ['0 0 * * WED-6', '0 0 * * 2-FRI', '0 0 * 1-JUL *', '0 0 * JAN-7 *']) {
+			const r = parseCron(expr);
+			assert.equal(r.ok, false, `${expr} should not parse`);
+			assert.match(r.error, /mixes a name and a number/, expr);
+			assert.equal(serverAcceptsCron(expr), false, `${expr} should not be accepted`);
+		}
+		const r = parseCron('0 0 * * WED-6');
+		assert.match(r.error, /`WED-FRI`/);
+		assert.match(r.error, /`4-6`/);
+	});
+
+	await t.test('a descending range says it runs backwards, not "out of range"', () => {
+		// `SAT-SUN` is how someone writes "the weekend", and both ends are in
+		// range — the old message sent them hunting for a number that was fine.
+		const r = parseCron('0 0 * * SAT-SUN');
+		assert.equal(r.ok, false);
+		assert.match(r.error, /runs backwards/);
+		assert.match(r.error, /SAT,SUN/);
+		assert.equal(serverAcceptsCron('0 0 * * SAT-SUN'), false);
+		assert.match(parseCron('0 0 * * FRI-WED').error ?? '', /runs backwards/);
+		// A numeric field has no names to show and must not invent any.
+		const mins = parseCron('10-2 * * * *');
+		assert.equal(mins.ok, false);
+		assert.match(mins.error, /runs backwards/);
+		assert.doesNotMatch(mins.error, /\(/);
+	});
+
+	await t.test('an out-of-range end is still out of range', () => {
+		assert.match(parseCron('0 0 * * 1-8').error ?? '', /out of range/);
+		// `WED` in the month field is a name from the other field, not the `W`
+		// operator — saying "you used W" there is the same lie in a new place.
+		assert.match(parseCron('0 0 * WED-13 *').error ?? '', /day-of-week name/);
+		assert.match(parseCron('0 0 * * JAN-3').error ?? '', /month name/);
+		// Five fields, so this one lands in minutes — the seconds field is the `0`
+		// that `parseCron` prepends.
+		assert.match(parseCron('MON * * * *').error ?? '', /is the minutes field/);
+	});
+
+	await t.test('the ascending, same-spelling ranges still work', () => {
+		assert.equal(first('0 0 * * SUN-SAT'), '2026-08-23T00:00:00.000Z');
+		assert.equal(first('0 0 * * 2-6/2'), '2026-08-24T00:00:00.000Z');
+		assert.equal(first('0 0 * * WED-FRI,SUN'), '2026-08-23T00:00:00.000Z');
+		assert.equal(first('0 0 * JUL-DEC *'), '2026-08-23T00:00:00.000Z');
 	});
 });
