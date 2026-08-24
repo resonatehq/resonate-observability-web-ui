@@ -590,3 +590,123 @@ test('a range has to ascend, and spell both ends the same way', async (t) => {
 		assert.equal(first('0 0 * JUL-DEC *'), '2026-08-23T00:00:00.000Z');
 	});
 });
+
+test('a range is two ends, and both of them are checked', async (t) => {
+	// Chains and out-of-range ends both used to hide behind another rule: the
+	// whole-item `[LW#]` test caught named chains by accident (W is in WED, L is
+	// in JUL) and the single combined bounds check caught reversed ends before
+	// they could reach the "runs backwards" message. Neither is load-bearing now,
+	// so both need saying out loud.
+	await t.test('a chain of three is refused, not silently truncated', () => {
+		for (const expr of [
+			'0 0 * * MON-WED-FRI',
+			'0 0 * JAN-JUL-DEC *',
+			'0 0 * * WED-FRI-',
+			'0 0 * * 1-2-3',
+			'0 1-2-3 * * *'
+		]) {
+			const r = parseCron(expr);
+			assert.equal(r.ok, false, `${expr} should not parse`);
+			assert.match(r.error, /more than one `-`/, expr);
+			assert.equal(serverAcceptsCron(expr), false, `${expr} should not be accepted`);
+			assert.equal(nextFireTimes(expr, REF, 3).ok, false, `${expr} should draw no preview`);
+		}
+	});
+
+	await t.test('the third end is the one that would have been dropped', () => {
+		// `MON-WED-FRI` parsed as `MON-WED` would describe itself as Monday to
+		// Wednesday — a confident sentence about an expression that named Friday.
+		const d = describeCron('0 0 * * MON-WED-FRI');
+		assert.equal(d.ok, false);
+		assert.doesNotMatch(d.error, /Wednesday/);
+	});
+
+	await t.test('a trailing hyphen is offered the range it was reaching for', () => {
+		assert.match(parseCron('0 0 * * WED-FRI-').error ?? '', /`WED-FRI`/);
+		assert.match(parseCron('0 0 * * --').error ?? '', /list the values with commas/);
+	});
+
+	await t.test('an end below the floor is out of range, not "backwards"', () => {
+		// `SAT-0` reported as backwards suggested `SAT,0` — which this same
+		// parser then refuses, so the message sent the reader in a circle.
+		for (const [expr, pattern] of [
+			['0 0 * * SAT-0', /out of range for day of week/],
+			['0 0 * * 9-2', /out of range for day of week/],
+			['0 30-5 * * *', /out of range for hours/],
+			['0 0 15-0 * *', /out of range for day of month/],
+			['0 0 1 13-2 *', /out of range for month/]
+		]) {
+			const r = parseCron(String(expr));
+			assert.equal(r.ok, false, `${expr} should not parse`);
+			assert.match(r.error, /** @type {RegExp} */ (pattern), String(expr));
+			assert.doesNotMatch(r.error, /runs backwards/, String(expr));
+		}
+	});
+
+	await t.test('every value a rejection suggests is one this parser accepts', () => {
+		// The property that makes an error message worth printing: what it tells
+		// you to type has to work. Backticked suggestions are field values, so
+		// they are checked by substituting them back into the same field.
+		for (const [expr, field] of [
+			['0 0 * * SAT-SUN', 4],
+			['0 0 * * MON/2', 4],
+			['0 0 * * WED-6', 4],
+			['0 0 * * MON-WED-FRI', 4],
+			['0 0 1 DEC-JAN *', 3],
+			['0 0 1 JAN/2 *', 3]
+		]) {
+			const r = parseCron(String(expr));
+			assert.equal(r.ok, false, `${expr} should not parse`);
+			const suggestions = [...r.error.matchAll(/`([^`]+)`/g)]
+				.map((m) => m[1])
+				// Not everything in backticks is advice: a message may NAME the
+				// operator that is wrong (``-``) as well as offer a replacement.
+				.filter((s) => !/^[-/,*?]$/.test(s))
+				.filter((s) => s !== String(expr).split(/\s+/)[Number(field)]);
+			assert.ok(suggestions.length > 0, `${expr} should suggest something`);
+			for (const s of suggestions) {
+				const parts = String(expr).split(/\s+/);
+				parts[Number(field)] = s;
+				const retry = parseCron(parts.join(' '));
+				assert.ok(retry.ok, `${expr} suggested \`${s}\`, which is refused: ${retry.error ?? ''}`);
+				assert.ok(serverAcceptsCron(parts.join(' ')), `\`${s}\` should be accepted`);
+			}
+		}
+	});
+});
+
+test('a rejection spells a named value both ways', async (t) => {
+	// The number alone is the thing the reader got wrong — `SAT-SUN` looks
+	// ascending until you know Sunday is 1 — so the message carries both.
+	await t.test('named fields show the ordinal and the name', () => {
+		const dow = parseCron('0 0 * * SAT-SUN');
+		assert.equal(dow.ok, false);
+		assert.match(dow.error, /7 \(SAT\)/);
+		assert.match(dow.error, /1 \(SUN\)/);
+
+		const month = parseCron('0 0 1 DEC-JAN *');
+		assert.equal(month.ok, false);
+		assert.match(month.error, /12 \(DEC\)/);
+		assert.match(month.error, /1 \(JAN\)/);
+	});
+
+	await t.test('a field with no names invents none', () => {
+		const mins = parseCron('10-2 * * * *');
+		assert.equal(mins.ok, false);
+		assert.doesNotMatch(mins.error, /\(/);
+	});
+
+	await t.test('the case the reader typed is not the case the answer needs', () => {
+		// Lowercase is accepted, so every rejection branch has to handle it too.
+		assert.match(parseCron('0 0 * * sat-sun').error ?? '', /7 \(SAT\)/);
+		assert.match(parseCron('0 0 * * mon/2').error ?? '', /`MON-SAT\/2`/);
+		assert.match(parseCron('0 0 * * wed-6').error ?? '', /`WED-FRI`/);
+	});
+
+	await t.test('a name after a step separator is read as a name', () => {
+		// `2/JAN` tokenizes on `/` as well as `-`, so the month name is caught by
+		// the cross-field check rather than falling through to "invalid step".
+		assert.match(parseCron('0 0 * * 2/JAN').error ?? '', /is a month name/);
+		assert.match(parseCron('0 0 1 1/MON *').error ?? '', /is a day-of-week name/);
+	});
+});

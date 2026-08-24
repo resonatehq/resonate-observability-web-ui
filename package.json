@@ -10,7 +10,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "node --test \"mocks/*.test.mjs\"",
     "mock": "node mocks/server.mjs --cors http://localhost:5173",
-    "conformance": "node mocks/conformance.mjs"
+    "conformance": "node mocks/conformance.mjs",
+    "cron-differential": "node mocks/cron-differential.mjs"
   },
   "engines": {
     "node": "^20.19 || ^22.12 || >=24"

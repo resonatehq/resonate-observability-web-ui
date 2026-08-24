@@ -231,7 +231,29 @@ function parseField(raw, spec) {
 			// `*/5 * * * *` describe itself as "every minute".
 			if (step > 1) wildcard = false;
 		} else if (rangePart.includes('-')) {
-			const [a, b] = rangePart.split('-');
+			const ends = rangePart.split('-');
+			// A range has exactly two ends. `MON-WED-FRI` and a trailing `WED-FRI-`
+			// are both 400s, and destructuring the first two would silently DROP
+			// the rest: the preview and the description would then describe
+			// Monday-to-Wednesday for an expression that named Friday too. The old
+			// whole-item `[LW#]` test caught the named ones by accident, because W
+			// is in WED and L is in JUL — this says it on purpose, and catches the
+			// numeric chains that test never covered.
+			if (ends.length > 2) {
+				// Empty ends are dropped from the suggestion, so a trailing hyphen
+				// is offered the range it was probably meant to be rather than the
+				// half-written `WED-` it literally is.
+				const written = ends.filter(Boolean);
+				const suggestion =
+					written.length >= 2
+						? ` — write \`${written[0]}-${written[written.length - 1]}\`, or list the values with commas`
+						: '; list the values with commas instead';
+				return {
+					ok: false,
+					error: `\`${item}\` has more than one \`-\` in the ${spec.label} field. A range has two ends${suggestion}.`
+				};
+			}
+			const [a, b] = ends;
 			start = resolve(a);
 			end = resolve(b);
 			// The crate will not mix the two spellings in one range: `WED-6` and
@@ -267,7 +289,11 @@ function parseField(raw, spec) {
 		if (Number.isNaN(start) || Number.isNaN(end)) {
 			return { ok: false, error: `\`${item}\` is not a valid ${spec.label} value.` };
 		}
-		if (start < spec.min || end > spec.max) {
+		// Both ends, both bounds. Splitting `start > end` into its own message
+		// below is only safe if this catches every out-of-range value first —
+		// otherwise `SAT-0` reports as "runs backwards … ends at 0 (0)" and
+		// suggests `SAT,0`, which this same parser then rejects.
+		if (start < spec.min || start > spec.max || end < spec.min || end > spec.max) {
 			return {
 				ok: false,
 				error: `\`${item}\` is out of range for ${spec.label} (${spec.min}-${spec.max}).`

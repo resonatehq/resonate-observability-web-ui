@@ -56,9 +56,14 @@ const TIMEOUT_AT = 4_102_444_800_000; // 2100-01-01, so nothing times out mid-ru
  * caught disagreeing about what is legal. Verified expression by expression
  * against a live 0.9.8 on 2026-08-24.
  *
- * Coarse expressions only: every one fires at most daily, so a second or two
- * of clock skew between this process and the server cannot change the answer.
- * Putting `* * * * *` in here would make the report flap for no signal.
+ * Coarse expressions only, and the reason is operational rather than numerical:
+ * an accepted schedule starts FIRING on a real server, so a `* * * * *` in here
+ * would have every probe run leave a once-a-minute promise factory behind. The
+ * block below deletes what it creates, but only what it can see — a probe that
+ * fires between the create and the delete has already made promises. At daily
+ * granularity nothing fires inside a run. (`0 0 30 2 *` is the exception that
+ * proves it: it is here BECAUSE the server accepts it and then fires it every
+ * 60 seconds, which is exactly what makes deleting it afterwards necessary.)
  */
 const CRON_PROBES = [
 	'0 0 * * WED-FRI', // a named range with W inside an endpoint
@@ -295,6 +300,8 @@ export async function runProbes(url) {
 		// with the OLD record, whose nextRunAt may long since have passed —
 		// which would read as a conformance failure and be a dirty database.
 		const stamp = Date.now().toString(36);
+		/** @type {string[]} */
+		const created = [];
 		let n = 0;
 		for (const expr of CRON_PROBES) {
 			n += 1;
@@ -317,6 +324,7 @@ export async function runProbes(url) {
 			// clock: the mock runs a deterministic clock that is nowhere near
 			// wall time, and a real server's is its own. Both report the instant
 			// they computed nextRunAt from, so the comparison needs no clock.
+			created.push(id);
 			const sched = r.body.data?.schedule;
 			const next = sched?.nextRunAt ?? null;
 			const from = sched?.createdAt ?? null;
@@ -329,6 +337,19 @@ export async function runProbes(url) {
 			else verdict = `accepted, preview off by ${next - preview.times[0]}ms`;
 			record(`cron[${expr}]`, verdict);
 		}
+
+		// Delete every schedule this block created. Without it the harness is a
+		// slow leak on any long-lived server it is pointed at: 16 schedules per
+		// run, one of which (`0 0 30 2 *`) fires every 60 seconds forever and
+		// mints a `probe: yes` promise each time. Both counts feed probes that
+		// are recorded above — `scheduleSearch.dataShape` grows a `cursor` key
+		// past 10 schedules, `search.cursorOmittedOnLastPage` flips past 1000
+		// promises — so an uncleaned run makes the NEXT run diff against a fresh
+		// mock for reasons that have nothing to do with the fixture.
+		//
+		// Deliberately not recorded: `schedule.delete` on an id that was never
+		// created answers 404, and the rejected expressions above created none.
+		for (const id of created) await rpc(url, 'schedule.delete', { id });
 	}
 
 	// ── health ───────────────────────────────────────────────────────────────

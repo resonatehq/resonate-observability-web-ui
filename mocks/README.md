@@ -7,6 +7,7 @@ can be developed and tested without a Rust toolchain in the loop.
 npm run mock          # http://127.0.0.1:8099, CORS open to the Vite dev server
 npm test              # protocol conformance suite
 npm run conformance   # diff this fixture against a real server (see below)
+npm run cron-differential  # sweep the cron grammar against a real server
 ```
 
 ## Why this exists
@@ -117,7 +118,7 @@ branches without minting JWTs.
 ## Verifying the fixture against a real server
 
 The tests prove the fixture is self-consistent. They cannot prove it matches the
-server. `conformance.mjs` does that: it runs 65 identical probes against any
+server. `conformance.mjs` does that: it runs 81 identical probes against any
 envelope-speaking server and prints a JSON report to diff.
 
 ```bash
@@ -133,9 +134,32 @@ diff real.json mock.json          # any output is a place this fixture lies
 The harness seeds what it needs under a `conformance-` id prefix, so it is
 meaningful against an empty binary and safe to re-run against a dirty one.
 
-**Last verified:** 2026-08-21 against `resonate 0.9.8` (Homebrew), in three
-configurations — explicit-origin CORS, permissive CORS, and
-`--auth-publickey none`. 65/65 probes identical in each.
+**Last verified:** 2026-08-24 against `resonate 0.9.8` (Homebrew). 81/81 probes
+identical, on a clean database and on a re-run against the same dirty one.
+Earlier, 2026-08-21: 65/65 in three configurations — explicit-origin CORS,
+permissive CORS, and `--auth-publickey none`.
+
+⚠ Two probes are data-dependent rather than server-dependent, so match the
+configuration before calling a diff a fixture bug. `scheduleSearch.dataShape`
+grows a `cursor` key once more than ten schedules exist on the server, and every
+`cors.*` probe reads null unless the server was started with
+`--server-cors-allow-origin`.
+
+### Sweeping the cron grammar
+
+`conformance.mjs` carries a 16-expression cron corpus, small enough to read in a
+diff. `cron-differential.mjs` is the wide version — every named weekday and month
+range in both directions, chains, steps, mixed spellings and the unsupported
+operators, ~560 expressions — asking a real server about each one and comparing
+the verdict and the fire time to what `src/lib/utils/cron.js` predicts.
+
+```bash
+node mocks/cron-differential.mjs http://127.0.0.1:8098   # exits non-zero on any mismatch
+```
+
+It deletes every schedule it creates. That is not tidiness: an accepted cron
+starts firing on a real server, and the corpus deliberately includes expressions
+the server accepts and then retries every 60 seconds forever.
 
 > The fixture defaults to port 8099 and the examples use 8098 for the real
 > server, leaving the server's own default of 8001 free. Check with
@@ -149,6 +173,7 @@ configurations — explicit-origin CORS, permissive CORS, and
 | `server.mjs` | The server. Every rule cites the `resonatehq/resonate` line it came from. |
 | `server.test.mjs` | Conformance suite (`node:test`, no dependencies). |
 | `conformance.mjs` | Differential harness — runs the same probes anywhere. |
+| `cron-differential.mjs` | Wide cron sweep — ~560 expressions against a real server. |
 
 ## Seed data
 
