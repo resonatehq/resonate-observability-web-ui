@@ -19,6 +19,7 @@
 import { createMockServer } from './server.mjs';
 import { PROTOCOL_VERSION } from './protocol.mjs';
 import { nextFireTimes } from '../src/lib/utils/cron.js';
+import { scheduleCreatePayload, isDuplicateEcho } from '../src/lib/api/duplicate.js';
 
 let counter = 0;
 
@@ -50,6 +51,26 @@ const rpc = (url, kind, data, opts = {}) =>
 	});
 
 const TIMEOUT_AT = 4_102_444_800_000; // 2100-01-01, so nothing times out mid-run
+
+/**
+ * `JSON.stringify` with keys sorted, for probes that compare a payload the
+ * server echoed back.
+ *
+ * A real 0.9.8 echoes `{headers, data}` as `{data, headers}` and the mock
+ * echoes it in the order it arrived. That is a true difference between the two
+ * and a meaningless one — the UI's comparison is key-order-insensitive
+ * precisely because of it — so recording the raw string would put a permanent
+ * benign line in every real-vs-mock diff, which is the fastest way to teach
+ * someone to stop reading diffs. Content still compares; ordering does not.
+ */
+function canonicalJson(value) {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	const entries = Object.keys(value)
+		.sort()
+		.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`);
+	return `{${entries.join(',')}}`;
+}
 
 /**
  * The cron corpus, one entry per way the UI parser and the server have been
@@ -350,6 +371,71 @@ export async function runProbes(url) {
 		// Deliberately not recorded: `schedule.delete` on an id that was never
 		// created answers 404, and the rejected expressions above created none.
 		for (const id of created) await rpc(url, 'schedule.delete', { id });
+	}
+
+	// ── schedule.create echo fidelity ────────────────────────────────────────
+	//
+	// Duplicate detection reports "that id already exists — nothing was created"
+	// by comparing the returned record against the submitted one, so it rests
+	// entirely on the server echoing a SUCCESSFUL create back unchanged. If a
+	// server ever normalises an echoed field — adds `headers: {}`, drops an
+	// empty `data`, stringifies the timeout — every genuine create starts being
+	// reported to the operator as a duplicate. That is the failure this block
+	// exists to catch, and it cannot be caught by `shape()`: normalisation
+	// preserves the type and changes the value.
+	//
+	// These call the shipped `isDuplicateEcho` rather than reimplementing the
+	// comparison, so what is probed here is what the UI actually runs.
+	{
+		const stamp = Date.now().toString(36);
+		const id = `conformance-echo-${stamp}`;
+
+		const sent = scheduleCreatePayload({
+			id,
+			cron: '0 2 1 1 *',
+			promiseId: `${id}-{{.timestamp}}`,
+			promiseTimeout: 3_600_000,
+			promiseParam: { headers: { 'x-probe': 'echo' }, data: b64({ func: 'probe' }) },
+			promiseTags: { probe: 'yes' }
+		});
+		const r = await rpc(url, 'schedule.create', sent);
+		const echoed = r.body.data?.schedule;
+
+		record('createEcho.status', r.status);
+		record('createEcho.param', canonicalJson(echoed?.promiseParam ?? null));
+		record('createEcho.tags', canonicalJson(echoed?.promiseTags ?? null));
+		record('createEcho.timeoutType', typeof echoed?.promiseTimeout);
+		// The one that matters: a fresh create must never read as a duplicate.
+		record('createEcho.freshReadsAsDuplicate', echoed ? isDuplicateEcho(sent, echoed) : null);
+
+		// An omitted param and an omitted tag map are the form's default, and
+		// `{}` is the shape most likely to be normalised into something else.
+		const bareId = `conformance-echo-bare-${stamp}`;
+		const bare = scheduleCreatePayload({
+			id: bareId,
+			cron: '0 2 1 1 *',
+			promiseId: `${bareId}-{{.timestamp}}`,
+			promiseTimeout: 3_600_000
+		});
+		const rb = await rpc(url, 'schedule.create', bare);
+		const bareEcho = rb.body.data?.schedule;
+		record('createEcho.bareParam', canonicalJson(bareEcho?.promiseParam ?? null));
+		record('createEcho.bareTags', canonicalJson(bareEcho?.promiseTags ?? null));
+		record('createEcho.bareReadsAsDuplicate', bareEcho ? isDuplicateEcho(bare, bareEcho) : null);
+
+		// And the case detection exists for: the same id resubmitted with a
+		// different cron answers 200 with the ORIGINAL record.
+		const resubmit = scheduleCreatePayload({ ...sent, cron: '0 3 1 1 *' });
+		const rr = await rpc(url, 'schedule.create', resubmit);
+		const resubmitEcho = rr.body.data?.schedule;
+		record('createEcho.duplicateStatus', rr.status);
+		record('createEcho.duplicateKeepsOriginalCron', resubmitEcho?.cron === sent.cron);
+		record(
+			'createEcho.duplicateDetected',
+			resubmitEcho ? isDuplicateEcho(resubmit, resubmitEcho) : null
+		);
+
+		for (const created of [id, bareId]) await rpc(url, 'schedule.delete', { id: created });
 	}
 
 	// ── health ───────────────────────────────────────────────────────────────

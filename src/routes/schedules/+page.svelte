@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, tick } from 'svelte';
 	import { searchSchedules, ApiError, type ScheduleRecord } from '$lib/api/client';
 	import ScheduleTable from '$lib/components/ScheduleTable.svelte';
 	import ScheduleForm from '$lib/components/ScheduleForm.svelte';
@@ -12,6 +12,20 @@
 	let hasMore = $state(false);
 	let showForm = $state(false);
 	let created = $state<ScheduleRecord | null>(null);
+
+	/**
+	 * Both ways out of the form unmount the control that was focused — the
+	 * submit button or the cancel button — and focus then falls to `<body>`,
+	 * so a keyboard user's next Tab restarts at the top of the page. The
+	 * `role="status"` banner keeps screen-reader users informed either way;
+	 * this is what sighted keyboard users were missing.
+	 *
+	 * Create lands on the banner, because the link to the new schedule is the
+	 * next thing anyone wants. Cancel returns focus to the button that opened
+	 * the form, which is where it came from.
+	 */
+	let createdAlert = $state<HTMLElement | null>(null);
+	let newButton = $state<HTMLButtonElement | null>(null);
 
 	async function load(append = false) {
 		loading = true;
@@ -41,10 +55,18 @@
 	 * schedule is actually registered and being scheduled — appending locally
 	 * would show a row that looks identical whether or not that is true.
 	 */
-	function onCreated(schedule: ScheduleRecord) {
+	async function onCreated(schedule: ScheduleRecord) {
 		showForm = false;
 		created = schedule;
 		load(false);
+		await tick();
+		createdAlert?.focus();
+	}
+
+	async function onCancel() {
+		showForm = false;
+		await tick();
+		newButton?.focus();
 	}
 </script>
 
@@ -53,6 +75,7 @@
 	{#if !showForm}
 		<button
 			class="btn btn-primary new-schedule"
+			bind:this={newButton}
 			onclick={() => {
 				showForm = true;
 				created = null;
@@ -64,11 +87,11 @@
 </div>
 
 {#if showForm}
-	<ScheduleForm oncreated={onCreated} oncancel={() => (showForm = false)} />
+	<ScheduleForm oncreated={onCreated} oncancel={onCancel} />
 {/if}
 
 {#if created}
-	<div class="alert created-alert" role="status">
+	<div class="alert created-alert" role="status" tabindex="-1" bind:this={createdAlert}>
 		Created <a href="/schedules/{created.id}" class="mono">{created.id}</a>. First run
 		<span class="mono">{new Date(created.nextRunAt).toISOString().replace('T', ' ').slice(0, 19)} UTC</span>.
 	</div>
@@ -112,6 +135,14 @@
 		border: 1px solid var(--status-resolved);
 		color: var(--status-resolved-fg);
 		margin-bottom: 1.25rem;
+	}
+
+	/* The banner is only ever focused programmatically, and the whole point of
+	   moving focus there is that a sighted keyboard user can see where they
+	   landed — so this ring stays. */
+	.created-alert:focus {
+		outline: 2px solid var(--status-resolved);
+		outline-offset: 2px;
 	}
 
 	.created-alert a {
