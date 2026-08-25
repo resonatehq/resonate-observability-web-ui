@@ -87,8 +87,9 @@ interface ResponseEnvelope<T> {
  */
 export type ApiErrorKind =
 	| 'unreachable' // no HTTP response at all — usually CORS, sometimes a wrong URL
-	| 'unauthorized' // 401: missing, malformed or expired token
-	| 'forbidden' // 403: token is valid but not scoped for this
+	| 'unauthorized' // 401: missing, malformed or expired Resonate token
+	| 'forbidden' // 403: Resonate token is valid but not scoped for this
+	| 'cloud_run_unauthorized' // 401/403 rejected at the Cloud Run edge, never reached the server
 	| 'not_found' // 404
 	| 'bad_request' // 400, including protocol-version mismatch
 	| 'server_error' // 5xx
@@ -124,6 +125,26 @@ function unreachable(serverUrl: string, cause: unknown): ApiError {
 		`If the server is running, it is probably not allowing requests from this page. ` +
 			`Restart it with:\n\n    resonate serve --server-cors-allow-origin ${origin}\n\n` +
 			`Otherwise check the URL in Settings. (${cause instanceof Error ? cause.message : String(cause)})`
+	);
+}
+
+/**
+ * A 401/403 that Cloud Run's own edge produced, never reaching the Resonate
+ * server — recognisable because the body is not the JSON envelope every real
+ * server response is. Cloud Run IAM tokens expire after exactly one hour and
+ * cannot be refreshed by a browser app, so this is the likeliest cause and the
+ * remedy says so specifically rather than leaving the operator to guess
+ * between this and an expired Resonate token.
+ */
+function cloudRunUnauthorized(serverUrl: string, status: number): ApiError {
+	return new ApiError(
+		'cloud_run_unauthorized',
+		`Rejected with ${status} before reaching the Resonate server — this looks like Cloud Run IAM, not Resonate's own auth.`,
+		status,
+		`Mint a fresh identity token and paste it into the "Cloud Run Identity Token" field in ` +
+			`Settings — these expire after exactly one hour and cannot be refreshed automatically:\n\n` +
+			`    gcloud auth print-identity-token --audiences=${serverUrl} \\\n` +
+			`        --impersonate-service-account=<service-account-with-run.invoker>`
 	);
 }
 
@@ -183,6 +204,20 @@ function nextCorrId(): string {
 	return `ui-${Date.now().toString(36)}-${corrCounter}`;
 }
 
+/**
+ * The header Cloud Run IAM checks, when the operator's server sits behind it.
+ *
+ * This is a different layer from `head.auth` below: Cloud Run validates this
+ * header at the edge and forwards the app's own `Authorization` header to the
+ * container untouched, so the two credentials never collide. Empty when no
+ * Cloud Run token is configured, which is the common case for a server not
+ * running behind Cloud Run at all.
+ */
+function cloudRunHeaders(): Record<string, string> {
+	const token = connectionStore.cloudRunToken;
+	return token ? { 'X-Serverless-Authorization': `Bearer ${token}` } : {};
+}
+
 async function rpc<T>(kind: string, data: Record<string, unknown>): globalThis.Promise<T> {
 	const serverUrl = connectionStore.url.replace(/\/+$/, '') || '';
 	const head: Record<string, unknown> = { corrId: nextCorrId(), version: PROTOCOL_VERSION };
@@ -194,11 +229,15 @@ async function rpc<T>(kind: string, data: Record<string, unknown>): globalThis.P
 	try {
 		resp = await fetch(`${serverUrl}/`, {
 			method: 'POST',
-			headers: { 'content-type': 'application/json' },
+			headers: { 'content-type': 'application/json', ...cloudRunHeaders() },
 			body: JSON.stringify({ kind, head, data })
 		});
 	} catch (cause) {
 		throw unreachable(serverUrl, cause);
+	}
+
+	if ((resp.status === 401 || resp.status === 403) && !resp.headers.get('content-type')?.includes('json')) {
+		throw cloudRunUnauthorized(serverUrl, resp.status);
 	}
 
 	let body: ResponseEnvelope<T>;
@@ -336,7 +375,10 @@ export async function testConnection(
 ): globalThis.Promise<{ ok: boolean; detail: string }> {
 	const base = url.replace(/\/+$/, '');
 	try {
-		const resp = await fetch(`${base}/health`);
+		const resp = await fetch(`${base}/health`, { headers: cloudRunHeaders() });
+		if (resp.status === 401 || resp.status === 403) {
+			return { ok: false, detail: cloudRunUnauthorized(base, resp.status).remedy };
+		}
 		if (!resp.ok) {
 			return { ok: false, detail: `The server answered ${resp.status} at ${base}/health.` };
 		}

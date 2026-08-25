@@ -1,18 +1,45 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { connectionStore } from '$lib/stores/connection.svelte';
 	import { testConnection } from '$lib/api/client';
+	import { jwtExpiry } from '$lib/utils/jwt.js';
 
 	let url = $state(connectionStore.url);
 	let token = $state(connectionStore.token);
+	let cloudRunToken = $state(connectionStore.cloudRunToken);
 	let saved = $state(false);
 	let showToken = $state(false);
+	let showCloudRunToken = $state(false);
 
 	let testing = $state(false);
 	let testResult = $state<{ ok: boolean; detail: string } | null>(null);
 
+	// Ticks once a minute so the expiry hint below counts down live rather than
+	// only updating when the operator happens to re-render the page some other
+	// way — a token can lapse while this tab just sits open.
+	let now = $state(Date.now());
+	onMount(() => {
+		const interval = setInterval(() => (now = Date.now()), 60_000);
+		return () => clearInterval(interval);
+	});
+
+	/**
+	 * A one-line status for the Cloud Run token, or null when there is nothing
+	 * to say — no token entered, or one this UI cannot decode.
+	 */
+	let cloudRunTokenStatus = $derived.by(() => {
+		if (!cloudRunToken) return null;
+		const exp = jwtExpiry(cloudRunToken);
+		if (exp === null) return null;
+		const minutes = Math.round((exp - now) / 60_000);
+		if (minutes <= 0) return { expired: true, text: 'This token has expired.' };
+		return { expired: false, text: `Expires in ${minutes} minute${minutes === 1 ? '' : 's'}.` };
+	});
+
 	function persist() {
 		connectionStore.url = url;
 		connectionStore.token = token;
+		connectionStore.cloudRunToken = cloudRunToken;
 	}
 
 	function handleSave(e: SubmitEvent) {
@@ -84,6 +111,45 @@
 				<code>role: "admin"</code> or an empty <code>prefix</code> claim &mdash; a
 				prefix-scoped token cannot run the searches this UI is built on.
 			</span>
+		</label>
+
+		<label class="field">
+			<span class="field-label">Cloud Run Identity Token</span>
+			<div class="token-input-row">
+				{#if showCloudRunToken}
+					<input
+						type="text"
+						class="search-input mono"
+						bind:value={cloudRunToken}
+						placeholder="eyJhbGci..."
+					/>
+				{:else}
+					<input
+						type="password"
+						class="search-input mono"
+						bind:value={cloudRunToken}
+						placeholder="eyJhbGci..."
+					/>
+				{/if}
+				<button type="button" class="btn btn-sm" onclick={() => (showCloudRunToken = !showCloudRunToken)}>
+					{showCloudRunToken ? 'Hide' : 'Show'}
+				</button>
+			</div>
+			<span class="field-hint">
+				Only needed if this server sits behind Google Cloud Run with IAM authentication
+				enabled &mdash; a different layer from the Resonate token above, sent as an HTTP
+				header rather than in the request body. Mint one with:
+				<code>gcloud auth print-identity-token --audiences=&lt;server-url&gt; --impersonate-service-account=&lt;sa&gt;</code>
+				(an interactive user account cannot mint an audience-scoped token directly; the
+				service account impersonated needs <code>roles/run.invoker</code> on the service).
+				These expire after exactly one hour and cannot be refreshed automatically &mdash;
+				you will need to paste in a fresh one periodically.
+			</span>
+			{#if cloudRunTokenStatus}
+				<span class="field-hint" class:token-expired={cloudRunTokenStatus.expired}>
+					{cloudRunTokenStatus.text}
+				</span>
+			{/if}
 		</label>
 
 		<div class="form-actions">
@@ -179,6 +245,10 @@
 	.field-hint {
 		font-size: 0.75rem;
 		color: var(--text-muted);
+	}
+
+	.field-hint.token-expired {
+		color: var(--status-rejected-fg);
 	}
 
 	.token-input-row {
