@@ -16,6 +16,8 @@
 	import TimelineView from '$lib/components/timeline/TimelineView.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import AskAi from '$lib/components/AskAi.svelte';
+	import { treeOutline } from '$lib/api/bundle.js';
 
 	let root = $state<TreeNode | null>(null);
 	let error = $state<ApiError | null>(null);
@@ -137,6 +139,52 @@
 		const interval = setInterval(() => loadTree(id, true), 5000); // Background refresh
 		return () => clearInterval(interval);
 	});
+
+	/**
+	 * The records go out flat, as the server returned them, and the tree is
+	 * carried separately as an outline. Both are needed: the flat list is the
+	 * evidence, and the outline is the thing this view exists to show, which no
+	 * amount of staring at sibling records will recover.
+	 */
+	function capture() {
+		return {
+			view: 'Workflow detail',
+			path: `/workflows/${page.params.id}`,
+			viewState: {
+				workflowId: page.params.id,
+				tab: activeTab,
+				graphDirection: activeTab === 'graph' ? direction : null,
+				autoRefreshMs: 5000,
+				completedSteps,
+				totalSteps,
+				rootStatus
+			},
+			structure: root
+				? {
+						label: 'Workflow structure',
+						description:
+							'The parent/child tree, ids and states only — the full records are below. A node ' +
+							'marked `missing` was not in the search results and is a placeholder: its state is ' +
+							'not a fact about that promise.',
+						value: treeOutline(root)
+					}
+				: null,
+			groups: [
+				{
+					label: 'Promises in this workflow',
+					kind: 'promise',
+					records: allNodes.map((node) => node.promise)
+				}
+			],
+			selection: selectedPromise
+				? { label: `the promise \`${selectedPromise.id}\``, record: selectedPromise }
+				: null,
+			notes: [
+				`The ${activeTab} tab is open. All three tabs — graph, timeline and list — render this same set of promises, so the bundle is the same whichever is showing.`,
+				'`rootStatus` aggregates the whole subtree and is computed in the browser; it is not a field on any record.'
+			]
+		};
+	}
 </script>
 
 <div class="workflow-page">
@@ -154,6 +202,7 @@
 					<span class="duration">{formatDuration(rootDuration)}</span>
 				{/if}
 			{/if}
+			<AskAi {capture} size="small" />
 		</div>
 	</div>
 

@@ -4,6 +4,7 @@
 	import { formatDuration } from '$lib/utils/tree';
 	import Badge from '$lib/components/Badge.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import AskAi from '$lib/components/AskAi.svelte';
 	import type { PromiseRecord } from '$lib/api/client';
 
 	let promise = $state<PromiseRecord | null>(null);
@@ -57,10 +58,26 @@
 
 		return { formatted: decoded, hasTarget: false };
 	}
+
+	function capture() {
+		return {
+			view: 'Promise detail',
+			path: `/promises/${page.params.id}`,
+			viewState: { promiseId: page.params.id },
+			groups: [
+				{ label: 'The promise', kind: 'promise', records: promise ? [promise] : [] }
+			],
+			selection: null,
+			notes: [
+				'One promise, fetched by id. Its parent and children are not here — this view does not load them.'
+			]
+		};
+	}
 </script>
 
 <div class="page-header">
 	<h1>Promise: <span class="mono">{page.params.id}</span></h1>
+	<AskAi {capture} />
 	<a href="/promises" class="btn">Back to List</a>
 </div>
 

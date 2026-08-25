@@ -5,6 +5,7 @@
 	import ActiveWorkflows from '$lib/components/dashboard/ActiveWorkflows.svelte';
 	import ErrorList from '$lib/components/dashboard/ErrorList.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import AskAi from '$lib/components/AskAi.svelte';
 
 	$effect(() => {
 		dashboardStore.startPolling(5000);
@@ -14,6 +15,43 @@
 	let stats = $derived(dashboardStore.stats);
 	let loading = $derived(dashboardStore.loading);
 	let error = $derived(dashboardStore.error);
+
+	/**
+	 * The computed stats go in alongside the records they were computed from.
+	 * They are not redundant: every figure on this page is a client-side count
+	 * over one page of search results, so an assistant that recomputed them from
+	 * the records would get the same numbers and conclude they were server
+	 * totals. The note says otherwise, in the bundle, where it will be read.
+	 */
+	function capture() {
+		return {
+			view: 'Dashboard',
+			path: '/',
+			viewState: {
+				autoRefreshMs: 5000,
+				sampleSize: dashboardStore.sampleSize,
+				sampleTruncated: dashboardStore.sampleTruncated,
+				computedStats: stats
+			},
+			groups: [
+				{
+					label: 'Promises sampled',
+					kind: 'promise',
+					records: dashboardStore.promises
+				},
+				{
+					label: 'Schedules',
+					kind: 'schedule',
+					records: dashboardStore.schedules
+				}
+			],
+			selection: null,
+			notes: [
+				`Every figure on this dashboard is counted in the browser over a sample of ${dashboardStore.sampleSize} promises, not reported by the server. ${dashboardStore.sampleTruncated ? 'The server holds more promises than this sample covers, so these are not totals.' : 'The sample covered every promise the server returned.'}`,
+				'The sample is the first page of a search with no sort — the server offers none — so it is the first N promises by id, not the most recent.'
+			]
+		};
+	}
 </script>
 
 <div class="dashboard">
@@ -33,6 +71,7 @@
 						: ''} promises
 				</span>
 			{/if}
+			<AskAi {capture} size="small" />
 		</div>
 	</div>
 

@@ -4,6 +4,7 @@
 	import ScheduleTable from '$lib/components/ScheduleTable.svelte';
 	import ScheduleForm from '$lib/components/ScheduleForm.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import AskAi from '$lib/components/AskAi.svelte';
 
 	let schedules: ScheduleRecord[] = $state([]);
 	let error = $state<ApiError | null>(null);
@@ -68,10 +69,31 @@
 		await tick();
 		newButton?.focus();
 	}
+
+	function capture() {
+		return {
+			view: 'Schedules',
+			path: '/schedules',
+			viewState: {
+				loaded: schedules.length,
+				moreAvailable: hasMore,
+				createFormOpen: showForm,
+				justCreated: created?.id ?? null
+			},
+			groups: [{ label: 'Schedules in view', kind: 'schedule', records: schedules }],
+			selection: null,
+			notes: [
+				'A schedule creates a new promise on each fire, from `promiseId` as a template. `nextRunAt` and `lastRunAt` are epoch milliseconds, and the server evaluates cron in UTC.',
+				'`lastRunAt` is absent, not null, on a schedule that has never fired.',
+				'The server parses cron with the Rust `cron` crate, not Unix cron. Day-of-week is 1-7 with **1 = Sunday**, and day-of-month and day-of-week are ANDed rather than ORed — so a Unix reading of these expressions gets the wrong day. See `src/lib/utils/cron.js` for the full list.'
+			]
+		};
+	}
 </script>
 
 <div class="page-header">
 	<h1>Schedules</h1>
+	<AskAi {capture} size="small" />
 	{#if !showForm}
 		<button
 			class="btn btn-primary new-schedule"
