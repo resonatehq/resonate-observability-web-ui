@@ -11,6 +11,7 @@
  */
 
 import { connectionStore } from '$lib/stores/connection.svelte';
+import { scheduleCreatePayload, isDuplicateEcho } from './duplicate.js';
 
 /** The only protocol version the server accepts (src/types.rs:133-135). */
 export const PROTOCOL_VERSION = '2026-04-01';
@@ -299,20 +300,10 @@ export interface CreateScheduleParams {
  * `duplicate` reports. Without that check the UI cheerfully reports success
  * for a schedule it did not create, running on somebody else's cron.
  *
- * All five submitted fields are compared, not just the cron and the promise
- * id. The server discards the whole submission, so a resubmission that keeps
- * the cron and template but changes the timeout, the param or the target tag
- * is just as much a silent no-op — and those are the likelier edits, since
- * "same schedule, new target" is how someone tries to repoint one. Comparing
- * them costs nothing and needs no clock.
- *
- * Limit worth knowing: resubmitting an id with a record identical in every
- * one of those fields is indistinguishable from a fresh create. `createdAt`
- * would tell us, but only by trusting the browser clock against the server's,
- * and a skewed clock would then report false duplicates on genuine creates.
- * The undetectable case is the benign one — the schedule that exists is the
- * schedule that was asked for — so this trades it for not lying in the other
- * direction.
+ * The comparison itself, its verified-against-0.9.8 assumptions about what the
+ * server echoes, and what it cannot detect are all in `./duplicate.js` — kept
+ * out of this module so `node --test` can reach it, since anything importing
+ * this file drags in runes it cannot load.
  */
 export interface CreateScheduleOutcome {
 	schedule: ScheduleRecord;
@@ -322,46 +313,14 @@ export interface CreateScheduleOutcome {
 export async function createSchedule(
 	params: CreateScheduleParams
 ): globalThis.Promise<CreateScheduleOutcome> {
-	const data = await rpc<{ schedule: ScheduleRecord }>('schedule.create', {
-		id: params.id,
-		cron: params.cron,
-		promiseId: params.promiseId,
-		promiseTimeout: params.promiseTimeout,
-		promiseParam: params.promiseParam ?? {},
-		promiseTags: params.promiseTags ?? {}
-	});
-
+	// The payload is built once and then compared against, so the defaults
+	// applied on the way out cannot drift from the values checked on the way
+	// back.
+	const sent = scheduleCreatePayload(params);
+	const data = await rpc<{ schedule: ScheduleRecord }>('schedule.create', sent);
 	const returned = data.schedule;
-	const duplicate =
-		returned.cron !== params.cron ||
-		returned.promiseId !== params.promiseId ||
-		returned.promiseTimeout !== params.promiseTimeout ||
-		!sameJson(returned.promiseParam, params.promiseParam ?? {}) ||
-		!sameJson(returned.promiseTags, params.promiseTags ?? {});
 
-	return { schedule: returned, duplicate };
-}
-
-/**
- * Key-order-insensitive structural comparison, for diffing a record the server
- * echoed back against the one that went out. `JSON.stringify` alone would
- * report a difference purely from key ordering.
- */
-function sameJson(a: unknown, b: unknown): boolean {
-	if (a === b) return true;
-	if (typeof a !== typeof b || a === null || b === null) return false;
-	if (typeof a !== 'object') return false;
-
-	if (Array.isArray(a) || Array.isArray(b)) {
-		if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-		return a.every((item, i) => sameJson(item, b[i]));
-	}
-
-	const left = a as Record<string, unknown>;
-	const right = b as Record<string, unknown>;
-	const keys = Object.keys(left);
-	if (keys.length !== Object.keys(right).length) return false;
-	return keys.every((k) => Object.hasOwn(right, k) && sameJson(left[k], right[k]));
+	return { schedule: returned, duplicate: isDuplicateEcho(sent, returned) };
 }
 
 /**

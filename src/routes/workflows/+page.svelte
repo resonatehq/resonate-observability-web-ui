@@ -20,6 +20,7 @@
 	import WorkflowGraph from '$lib/components/graph/WorkflowGraph.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import AskAi from '$lib/components/AskAi.svelte';
 
 	interface WorkflowItem {
 		promise: PromiseRecord;
@@ -196,6 +197,51 @@
 		const interval = setInterval(() => loadWorkflows(false, true), 5000);
 		return () => clearInterval(interval);
 	});
+
+	/**
+	 * The cards show step counts, and those are computed here from each tree —
+	 * the root promise record carries no such field. They travel in `viewState`
+	 * beside the raw roots so an assistant is not left trying to derive a number
+	 * that is not in the data.
+	 */
+	function capture() {
+		return {
+			view: 'Workflows',
+			path: '/workflows',
+			viewState: {
+				stateFilter: stateFilter || null,
+				pageSize: PAGE_SIZE,
+				pagesLoaded,
+				moreAvailable: hasMore,
+				stepCounts: workflows.map((w) => ({
+					id: w.promise.id,
+					totalSteps: w.totalSteps,
+					completedSteps: w.completedSteps,
+					rejectedSteps: w.rejectedSteps,
+					pendingSteps: w.pendingSteps,
+					subtreeStatus: w.subtreeStatus,
+					treeLoaded: w.tree !== null,
+					treeFailed: w.treeError
+				}))
+			},
+			groups: [
+				{
+					label: 'Workflow root promises',
+					kind: 'promise',
+					records: workflows.map((w) => w.promise)
+				}
+			],
+			selection: null,
+			notes: [
+				'These are root promises only. The step promises under each one are not in this bundle — open a workflow to capture its tree.',
+				'A workflow root is a promise like any other; what makes it a root is that nothing else claims it as a parent.',
+				stateFilter
+					? `Filtered to state \`${stateFilter}\`, an exact match — the other four states are absent by request.`
+					: 'Unfiltered.',
+				'Ordered by promise id. The server offers no sort or time range, so this is not "the most recent".'
+			]
+		};
+	}
 </script>
 
 <div class="page-header">
@@ -213,6 +259,7 @@
 				<option value={state}>{stateLabel(state)}</option>
 			{/each}
 		</select>
+		<AskAi {capture} size="small" />
 	</div>
 </div>
 

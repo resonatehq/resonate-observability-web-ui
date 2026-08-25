@@ -10,6 +10,7 @@
 	import PromiseTable from '$lib/components/PromiseTable.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
 	import { stateLabel } from '$lib/utils/state';
+	import AskAi from '$lib/components/AskAi.svelte';
 
 	const PAGE_SIZE = 50;
 
@@ -47,6 +48,29 @@
 	$effect(() => {
 		untrack(() => load(false));
 	});
+
+	function capture() {
+		return {
+			view: 'Promises',
+			path: '/promises',
+			viewState: {
+				stateFilter: stateFilter || null,
+				pageSize: PAGE_SIZE,
+				loaded: promises.length,
+				moreAvailable: hasMore
+			},
+			groups: [{ label: 'Promises in view', kind: 'promise', records: promises }],
+			selection: null,
+			notes: [
+				stateFilter
+					? `Filtered to state \`${stateFilter}\`. The server's filter is an exact match, so the other four states are absent by request, not because none exist.`
+					: 'Unfiltered — every state the page reached is here.',
+				hasMore
+					? `These are the first ${promises.length} promises by id, and the server has more. Ordering is by id because the server offers no sort, so this is not "the most recent".`
+					: `All ${promises.length} matching promises the server holds. Ordering is by id — the server offers no sort.`
+			]
+		};
+	}
 </script>
 
 <div class="page-header">
@@ -77,6 +101,7 @@
 		{/each}
 	</select>
 	<span class="muted filter-note">Ordered by ID — the server offers no sort.</span>
+	<AskAi {capture} size="small" />
 </div>
 
 {#if error}

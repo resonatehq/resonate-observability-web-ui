@@ -126,6 +126,18 @@
 		return null;
 	});
 
+	/**
+	 * The advanced fields gate `canSubmit` but render only while the panel is
+	 * open, so an error in one of them used to leave Create disabled with no
+	 * visible reason anywhere in the form once the panel was collapsed —
+	 * collapsing is a tidy-up, not an undo, and the bad text is still in state.
+	 * The error follows the fields out and is shown on the toggle instead,
+	 * which keeps collapsing a real choice rather than a trap.
+	 */
+	const advancedProblems = $derived(
+		[paramProblem, tagsProblem].filter((problem) => problem !== null)
+	);
+
 	const canSubmit = $derived(
 		id.trim() !== '' &&
 			promiseId.trim() !== '' &&
@@ -381,10 +393,19 @@
 		type="button"
 		class="disclosure"
 		aria-expanded={showAdvanced}
+		aria-describedby={!showAdvanced && advancedProblems.length > 0
+			? 'sched-advanced-error'
+			: undefined}
 		onclick={() => (showAdvanced = !showAdvanced)}
 	>
 		{showAdvanced ? '−' : '+'} Promise param and extra tags
 	</button>
+
+	{#if !showAdvanced && advancedProblems.length > 0}
+		<p class="field-error disclosure-error" id="sched-advanced-error">
+			{advancedProblems.join(' ')} Open this section to fix it.
+		</p>
+	{/if}
 
 	{#if showAdvanced}
 		<div class="field">
@@ -583,6 +604,12 @@
 
 	.disclosure:hover {
 		text-decoration: underline;
+	}
+
+	/* Pulls up against the toggle's own 1rem gap so the error reads as
+	   belonging to it rather than floating above the actions. */
+	.disclosure-error {
+		margin: -0.7rem 0 1rem;
 	}
 
 	.actions {

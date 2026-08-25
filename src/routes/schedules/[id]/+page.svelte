@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { getSchedule, ApiError, decodeValueAsJson, type ScheduleRecord } from '$lib/api/client';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import AskAi from '$lib/components/AskAi.svelte';
 
 	const scheduleId = $derived(page.params.id!);
 
@@ -40,6 +41,24 @@
 	}
 
 	const paramJson = $derived(schedule ? decodeValueAsJson(schedule.promiseParam) : null);
+
+	function capture() {
+		return {
+			view: 'Schedule detail',
+			path: `/schedules/${scheduleId}`,
+			viewState: { scheduleId, autoRefreshMs: 5000 },
+			groups: [
+				{ label: 'The schedule', kind: 'schedule', records: schedule ? [schedule] : [] }
+			],
+			selection: null,
+			notes: [
+				'This is the schedule, not its runs. The promises it has created are not in this bundle — the server does not link them back from the schedule record.',
+				'`promiseId` is a template: the fired promise gets an id derived from it, so it is not itself a promise id you can look up.',
+				'`nextRunAt` and `lastRunAt` are epoch milliseconds, and the server evaluates cron in UTC.',
+				'The server parses cron with the Rust `cron` crate, not Unix cron. Day-of-week is 1-7 with **1 = Sunday**, and day-of-month and day-of-week are ANDed rather than ORed — so a Unix reading of these expressions gets the wrong day. See `src/lib/utils/cron.js` for the full list.'
+			]
+		};
+	}
 </script>
 
 <div class="schedule-detail">
@@ -54,6 +73,7 @@
 			<div>
 				<h1>{schedule.id}</h1>
 			</div>
+			<AskAi {capture} />
 			<a href="/schedules" class="btn">Back to Schedules</a>
 		</div>
 

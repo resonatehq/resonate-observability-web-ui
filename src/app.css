@@ -245,6 +245,30 @@ a:hover {
 	opacity: 0.9;
 }
 
+/* Until this existed, a disabled button was pixel-identical to an enabled one —
+   full-strength fill, pointer cursor, hover response — so the only feedback for
+   clicking one was nothing happening. That is half of why a form blocked on a
+   hidden validation error read as broken rather than as incomplete. Applies to
+   every .btn: submit, cancel and "Load more" are all disabled at some point.
+
+   Not `opacity` alone: dimming the primary button drags its label toward the
+   fill and out of 4.5:1. Muting the fill and keeping the label at full strength
+   holds contrast while still reading as unavailable. */
+.btn:disabled,
+.btn[aria-disabled='true'] {
+	cursor: not-allowed;
+	background: var(--bg-surface);
+	border-color: var(--border);
+	color: var(--text-muted);
+}
+
+.btn:disabled:hover,
+.btn[aria-disabled='true']:hover {
+	background: var(--bg-surface);
+	border-color: var(--border);
+	opacity: 1;
+}
+
 .btn-sm {
 	padding: 0.25rem 0.625rem;
 	font-size: 0.8125rem;
