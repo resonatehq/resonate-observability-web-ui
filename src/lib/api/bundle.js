@@ -703,7 +703,7 @@ function render(input, cap) {
 		failures.push(
 			recordCount === 0
 				? `**Every record this view would have shown.** The \`${failure.kind}\` failure above means none were loaded. Judge what exists from that failure and its kind, not from the empty lists here — they are empty because the request failed.`
-				: `**Whatever the failed request would have added.** The \`${failure.kind}\` failure above means the ${recordCount} ${recordCount === 1 ? 'record' : 'records'} here are what the view already had, not a complete or current answer.`
+				: `**Whatever the failed request would have added.** The \`${failure.kind}\` failure above means ${recordCount === 1 ? 'the single record here is' : `the ${recordCount} records here are`} what the view already had, not a complete or current answer.`
 		);
 	}
 

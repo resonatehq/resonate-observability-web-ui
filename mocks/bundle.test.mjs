@@ -389,8 +389,22 @@ describe('a view that failed to load says so instead of claiming to be complete'
 	test('a failure alongside records does not claim the lists are empty', () => {
 		const { text, recordCount } = buildBundle(capture({ loadError: unreachable }));
 		assert.equal(recordCount, 1);
-		assert.match(text, /the 1 record here are what the view already had/);
+		assert.match(text, /the single record here is what the view already had/);
 		assert.doesNotMatch(text, /none were loaded/);
+		// A count spliced into a sentence is where number agreement goes wrong,
+		// and a document that reads as visibly broken loses the reader's trust in
+		// the claims it makes elsewhere.
+		assert.doesNotMatch(text, /the 1 record/);
+	});
+
+	test('the plural branch agrees with its count too', () => {
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [promise(), promise()] }],
+				loadError: unreachable
+			})
+		);
+		assert.match(text, /the 2 records here are what the view already had/);
 	});
 
 	// The client builds its unreachable message out of the raw server URL, so
