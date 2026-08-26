@@ -133,6 +133,20 @@ const TALLY_SEP = '\u0000';
  * @property {{label: string, description: string, value: unknown} | null} [structure]
  *   Shape the flat record lists cannot carry — a workflow's parent/child tree, say.
  * @property {string[]} [secrets] Exact strings to scrub — in practice the auth token.
+ * @property {LoadFailure | null} [loadError]
+ *   Set when the view is rendering an error rather than data. A view that leaves
+ *   this out while showing an error panel produces a bundle asserting the server
+ *   is empty, which is worse than no bundle at all: the reader cannot tell.
+ */
+
+/**
+ * The failure a view is rendering, in the shape `ApiError` already carries.
+ *
+ * @typedef {object} LoadFailure
+ * @property {string} kind      Failure class, e.g. `unreachable`, `not-found`.
+ * @property {string} message   What the client said went wrong.
+ * @property {string} [remedy]  Operator-facing next step, when there is one.
+ * @property {number | null} [status] HTTP status, absent when nothing was reached.
  */
 
 /**
@@ -142,6 +156,7 @@ const TALLY_SEP = '\u0000';
  * @property {boolean} hasPayload Whether any included record carries payload bytes.
  * @property {string[]} truncations Human lines, one per cap that bound.
  * @property {string[]} redactions  Human lines, one per redaction that fired.
+ * @property {boolean} loadFailed Whether this bundle describes a view that failed to load.
  * @property {number} bytes       UTF-8 size of `text`.
  */
 
@@ -545,12 +560,49 @@ function render(input, cap) {
 		`**View:** ${input.view} (\`${input.path}\`)  `,
 		`**Server:** \`${server.url || '(not set)'}\`  `,
 		`**Captured:** ${input.capturedAt}`,
-		'',
-		'## What you are looking at',
-		'',
-		SCHEMA_NOTE,
 		''
 	);
+
+	const failure = input.loadError ?? null;
+	if (failure) {
+		// Ahead of the schema note and everything else: a reader who stops after
+		// the first section must still have learned the one thing that changes how
+		// to read the rest. Everything below this point describes an error state.
+		//
+		// The message is scrubbed rather than pushed as-is because the client
+		// builds it out of the *raw* server URL — so on a server reached as
+		// `https://ops:hunter2@host`, prose carries the credentials that
+		// `sanitizeServerUrl` just stripped from the header two lines above.
+		const clean = (/** @type {string} */ text) =>
+			String(
+				scrubber.scrub(
+					server.redacted && input.serverUrl ? text.split(input.serverUrl).join(server.url) : text,
+					'loadError'
+				)
+			);
+		sections.push(
+			'## This view failed to load',
+			'',
+			'**The request behind this view failed, so what follows is an error state — not the ' +
+				"server's contents.** Nothing below was learned from the server on this attempt.",
+			'',
+			`- **Failure:** \`${clean(failure.kind)}\``,
+			`- **What the console reported:** ${clean(failure.message)}`
+		);
+		if (failure.status != null) {
+			sections.push(`- **HTTP status:** ${failure.status}`);
+		}
+		sections.push('');
+		if (failure.remedy) {
+			// Its own block rather than a fourth bullet: the client's remedies are
+			// multi-line and carry an indented command, which inside a list item
+			// silently ends the list and leaves the rest of the advice dangling
+			// outside it.
+			sections.push('**Suggested next step:**', '', clean(failure.remedy), '');
+		}
+	}
+
+	sections.push('## What you are looking at', '', SCHEMA_NOTE, '');
 
 	if (input.notes?.length) {
 		sections.push('## About this view', '', ...input.notes.map((n) => `- ${n}`), '');
@@ -640,18 +692,36 @@ function render(input, cap) {
 		allRedactions.push('Removed a username and password embedded in the server URL.');
 	}
 
+	// The load failure is the largest thing a failed bundle left out, so it is
+	// named here as well as at the top — this is the section a reader is told to
+	// check before reading anything into an absence, and it is the one place the
+	// old document actively lied: with no caps and no redactions, a view that
+	// never reached the server reported "Nothing".
+	/** @type {string[]} */
+	const failures = [];
+	if (failure) {
+		failures.push(
+			recordCount === 0
+				? `**Every record this view would have shown.** The \`${failure.kind}\` failure above means none were loaded. Judge what exists from that failure and its kind, not from the empty lists here — they are empty because the request failed.`
+				: `**Whatever the failed request would have added.** The \`${failure.kind}\` failure above means the ${recordCount} ${recordCount === 1 ? 'record' : 'records'} here are what the view already had, not a complete or current answer.`
+		);
+	}
+
 	sections.push(
 		'## What this bundle left out',
 		'',
 		'Read this before concluding anything from an absence.',
 		''
 	);
-	if (allTruncations.length === 0 && allRedactions.length === 0) {
+	if (failures.length === 0 && allTruncations.length === 0 && allRedactions.length === 0) {
 		sections.push(
 			'Nothing. Every record rendered in this view is included in full, and no field needed redacting.',
 			''
 		);
 	} else {
+		if (failures.length > 0) {
+			sections.push('**Not loaded:**', '', ...failures.map((f) => `- ${f}`), '');
+		}
 		if (allTruncations.length > 0) {
 			sections.push('**Bounded:**', '', ...allTruncations.map((t) => `- ${t}`), '');
 		}
@@ -676,6 +746,7 @@ function render(input, cap) {
 		hasPayload: scrubber.hasPayload,
 		truncations: allTruncations,
 		redactions: allRedactions,
+		loadFailed: failure !== null,
 		bytes: new TextEncoder().encode(text).length
 	};
 }

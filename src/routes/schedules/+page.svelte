@@ -82,6 +82,7 @@
 			},
 			groups: [{ label: 'Schedules in view', kind: 'schedule', records: schedules }],
 			selection: null,
+			loadError: error,
 			notes: [
 				'A schedule creates a new promise on each fire, from `promiseId` as a template. `nextRunAt` and `lastRunAt` are epoch milliseconds, and the server evaluates cron in UTC.',
 				'`lastRunAt` is absent, not null, on a schedule that has never fired.',

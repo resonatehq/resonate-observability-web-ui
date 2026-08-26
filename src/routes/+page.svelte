@@ -46,8 +46,14 @@
 				}
 			],
 			selection: null,
+			loadError: error,
 			notes: [
-				`Every figure on this dashboard is counted in the browser over a sample of ${dashboardStore.sampleSize} promises, not reported by the server. ${dashboardStore.sampleTruncated ? 'The server holds more promises than this sample covers, so these are not totals.' : 'The sample covered every promise the server returned.'}`,
+				// The unqualified form claims a sample was taken and says how far it
+				// reached. Neither is true when the fetch failed: the figures below
+				// are what the browser computes over nothing.
+				error
+					? `Every figure on this dashboard is counted in the browser, not reported by the server — and this capture is of a failed load, so they are counted over no promises at all.`
+					: `Every figure on this dashboard is counted in the browser over a sample of ${dashboardStore.sampleSize} promises, not reported by the server. ${dashboardStore.sampleTruncated ? 'The server holds more promises than this sample covers, so these are not totals.' : 'The sample covered every promise the server returned.'}`,
 				'The sample is the first page of a search with no sort — the server offers none — so it is the first N promises by id, not the most recent.'
 			]
 		};

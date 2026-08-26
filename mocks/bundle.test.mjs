@@ -296,6 +296,144 @@ describe('the bundle says what it left out', () => {
 	});
 });
 
+describe('a view that failed to load says so instead of claiming to be complete', () => {
+	/** What the client hands a view when the server cannot be reached. */
+	const unreachable = {
+		kind: 'unreachable',
+		message: 'Could not reach the Resonate server at http://127.0.0.1:9999.',
+		status: null,
+		remedy: 'Start the server, or check the URL in Settings.'
+	};
+
+	// The property worth pinning above every formatting assertion below, and the
+	// exact sentence the bug produced: with no caps and no redactions, a view
+	// that never reached the server reported that it had left out nothing. An
+	// assistant reading that tells the operator their server is empty.
+	test('an errored capture can never produce the all-clear sentence', () => {
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: unreachable
+			})
+		);
+		assert.doesNotMatch(
+			text,
+			/Nothing\. Every record rendered in this view is included in full/,
+			'a bundle from a failed view claimed it was complete'
+		);
+	});
+
+	test('the failure is the first thing in the document, ahead of the records', () => {
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: unreachable
+			})
+		);
+		const failureAt = text.indexOf('## This view failed to load');
+		assert.ok(failureAt > -1, 'no failure section');
+		assert.ok(
+			failureAt < text.indexOf('## What you are looking at'),
+			'a reader meets the schema note before learning the view failed'
+		);
+		assert.ok(failureAt < text.indexOf('## Promises in view'), 'the records come first');
+	});
+
+	test('the kind, the message, the status and the remedy all survive into it', () => {
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: { ...unreachable, kind: 'not-found', status: 404 }
+			})
+		);
+		assert.match(text, /`not-found`/);
+		assert.match(text, /Could not reach the Resonate server/);
+		assert.match(text, /\*\*HTTP status:\*\* 404/);
+		assert.match(text, /\*\*Suggested next step:\*\*\n\nStart the server, or check the URL in Settings\./);
+	});
+
+	// The client's real remedies are multi-line and embed an indented command.
+	// Inside a bullet that ends the list at the first blank line, stranding the
+	// rest of the advice — so the remedy stands on its own, in full.
+	test('a multi-line remedy survives whole rather than breaking out of a list', () => {
+		const remedy =
+			'If the server is running, it is probably not allowing requests from this page. Restart it with:\n\n    resonate serve --server-cors-allow-origin http://localhost:5173\n\nOtherwise check the URL in Settings.';
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: { ...unreachable, remedy }
+			})
+		);
+		assert.ok(text.includes(remedy), 'the remedy was reflowed or cut');
+		assert.doesNotMatch(text, /- \*\*Suggested next step:\*\*/);
+	});
+
+	// The closing section is the one a reader is told to check before concluding
+	// anything from an absence, so the failure has to be named there too — not
+	// only at the top where it could be skimmed past.
+	test('the closing section names the failure as the largest thing left out', () => {
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: unreachable
+			})
+		);
+		const closing = text.slice(text.indexOf('## What this bundle left out'));
+		assert.match(closing, /Not loaded:/);
+		assert.match(closing, /they are empty because the request failed/);
+	});
+
+	// A detail view can hold a record from an earlier poll and then fail to
+	// refresh. Saying "none were loaded" there would be its own false claim, so
+	// the line has to describe what is actually in the document.
+	test('a failure alongside records does not claim the lists are empty', () => {
+		const { text, recordCount } = buildBundle(capture({ loadError: unreachable }));
+		assert.equal(recordCount, 1);
+		assert.match(text, /the 1 record here are what the view already had/);
+		assert.doesNotMatch(text, /none were loaded/);
+	});
+
+	// The client builds its unreachable message out of the raw server URL, so
+	// the prose would carry credentials that sanitizeServerUrl strips from the
+	// header. Same rule as everywhere else: not "redacted at the path we
+	// expected" but "nowhere in the document".
+	test('credentials in the failure message are scrubbed like anything else', () => {
+		const token = 'sk-live-4b21-not-a-real-token';
+		const { text } = buildBundle(
+			capture({
+				serverUrl: 'https://ops:hunter2@resonate.internal',
+				secrets: [token],
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: {
+					kind: 'unreachable',
+					message: `Could not reach the Resonate server at https://ops:hunter2@resonate.internal.`,
+					status: null,
+					remedy: `Retry with: curl -H 'Authorization: Bearer ${token}' https://resonate.internal`
+				}
+			})
+		);
+		assert.doesNotMatch(text, /hunter2/, 'a password rode along in the failure prose');
+		assert.ok(!text.includes(token), 'the auth token rode along in the failure prose');
+	});
+
+	test('loadFailed distinguishes a failed capture from a merely empty one', () => {
+		const empty = buildBundle(
+			capture({ groups: [{ label: 'Promises in view', kind: 'promise', records: [] }] })
+		);
+		const failed = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: unreachable
+			})
+		);
+		assert.equal(empty.loadFailed, false);
+		assert.equal(failed.loadFailed, true);
+		// A genuinely empty server is a fact a view may report, and the fix must
+		// not have made every empty view look like a broken one.
+		assert.match(empty.text, /Nothing\. Every record rendered in this view is included in full/);
+	});
+});
+
 describe('the bundle is readable to a model that has never seen Resonate', () => {
 	test('the schema note is in every bundle', () => {
 		assert.equal(buildBundle(capture()).text.includes(SCHEMA_NOTE), true);

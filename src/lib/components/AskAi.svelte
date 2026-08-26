@@ -129,6 +129,20 @@
 			{/if}
 		</p>
 
+		{#if bundle.loadFailed}
+			<!--
+				Said here as well as inside the bundle, because the operator is the
+				only party who can act on it: an assistant handed this document can
+				only report the failure back, whereas the person looking at this
+				panel can fix the connection and capture again.
+			-->
+			<div class="alert alert-warning">
+				<strong>This view failed to load.</strong> The bundle carries the error at the top and names it
+				again at the end, so an assistant reading it will not mistake an empty view for an empty
+				server. Fix the connection and capture again for a bundle with data in it.
+			</div>
+		{/if}
+
 		{#if bundle.hasPayload}
 			<!--
 				Params and outcomes are whatever the operator's own workflows put

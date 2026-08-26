@@ -68,8 +68,11 @@
 				{ label: 'The promise', kind: 'promise', records: promise ? [promise] : [] }
 			],
 			selection: null,
+			loadError: error,
 			notes: [
-				'One promise, fetched by id. Its parent and children are not here — this view does not load them.'
+				error
+					? 'This view fetches one promise by id, and that fetch failed — see the failure named at the top. The empty record list follows from that failure; read its kind before concluding anything about whether this id exists. Its parent and children are never loaded by this view.'
+					: 'One promise, fetched by id. Its parent and children are not here — this view does not load them.'
 			]
 		};
 	}

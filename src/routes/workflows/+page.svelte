@@ -232,6 +232,7 @@
 				}
 			],
 			selection: null,
+			loadError: error,
 			notes: [
 				'These are root promises only. The step promises under each one are not in this bundle — open a workflow to capture its tree.',
 				'A workflow root is a promise like any other; what makes it a root is that nothing else claims it as a parent.',

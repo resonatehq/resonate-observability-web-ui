@@ -179,6 +179,7 @@
 			selection: selectedPromise
 				? { label: `the promise \`${selectedPromise.id}\``, record: selectedPromise }
 				: null,
+			loadError: error,
 			notes: [
 				`The ${activeTab} tab is open. All three tabs — graph, timeline and list — render this same set of promises, so the bundle is the same whichever is showing.`,
 				'`rootStatus` aggregates the whole subtree and is computed in the browser; it is not a field on any record.'
