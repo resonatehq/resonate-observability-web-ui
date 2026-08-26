@@ -236,8 +236,13 @@
 			notes: [
 				'These are root promises only. The step promises under each one are not in this bundle — open a workflow to capture its tree.',
 				'A workflow root is a promise like any other; what makes it a root is that nothing else claims it as a parent.',
+				// Same shape as the promises list: on a failed load the filter is not
+				// the reason anything is absent, and stale roots from the previous
+				// filter survive in `workflows`.
 				stateFilter
-					? `Filtered to state \`${stateFilter}\`, an exact match — the other four states are absent by request.`
+					? error
+						? `\`${stateFilter}\` is the filter selected in the UI, but the request that would have applied it failed. The roots below are whatever the view held before, and they may not match it.`
+						: `Filtered to state \`${stateFilter}\`, an exact match — the other four states are absent by request.`
 					: 'Unfiltered.',
 				'Ordered by promise id. The server offers no sort or time range, so this is not "the most recent".'
 			]

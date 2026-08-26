@@ -70,9 +70,16 @@
 			selection: null,
 			loadError: error,
 			notes: [
-				error
-					? 'This view fetches one promise by id, and that fetch failed — see the failure named at the top. The empty record list follows from that failure; read its kind before concluding anything about whether this id exists. Its parent and children are never loaded by this view.'
-					: 'One promise, fetched by id. Its parent and children are not here — this view does not load them.'
+				// Three states, not two. The catch sets `error` without clearing
+				// `promise`, and the page renders both — so navigating from one id to
+				// one that 404s leaves the PREVIOUS promise on screen and in the
+				// bundle. A note calling that list empty is wrong, and a reader
+				// answering questions about this path from that record is worse.
+				!error
+					? 'One promise, fetched by id. Its parent and children are not here — this view does not load them.'
+					: promise
+						? `This view fetches one promise by id and the latest fetch failed, but the record below survives from an earlier one${promise.id !== page.params.id ? ` — and it is \`${promise.id}\`, **not** the \`${page.params.id}\` in this path` : ', so it may be stale'}. Its parent and children are never loaded by this view.`
+						: 'This view fetches one promise by id, and that fetch failed — see the failure named at the top. The empty record list follows from that failure; read its kind before concluding anything about whether this id exists. Its parent and children are never loaded by this view.'
 			]
 		};
 	}

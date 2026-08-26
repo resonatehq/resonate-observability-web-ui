@@ -21,6 +21,30 @@ import {
 
 const b64 = (text) => Buffer.from(text, 'utf8').toString('base64');
 
+/**
+ * Everything in the document that a markdown reader sees as prose — fenced
+ * blocks removed. Text-matching the whole document cannot tell a heading the
+ * console wrote from one quarantined inside a fence, and that difference is the
+ * entire defence against a server writing its own section.
+ *
+ * Follows the CommonMark rule the renderer will: a fence is closed only by a
+ * run of backticks at least as long as the one that opened it.
+ */
+function outsideFences(text) {
+	const out = [];
+	let openFence = null;
+	for (const line of text.split('\n')) {
+		const match = /^(`{3,})(.*)$/.exec(line);
+		if (openFence === null) {
+			if (match) openFence = match[1].length;
+			else out.push(line);
+		} else if (match && match[1].length >= openFence && match[2].trim() === '') {
+			openFence = null;
+		}
+	}
+	return out.join('\n');
+}
+
 /** A promise record with the shape the server actually returns. */
 function promise(overrides = {}) {
 	return {
@@ -148,7 +172,20 @@ describe('the bundle never carries a credential', () => {
 	test('a server URL that does not parse is reported as-is rather than dropped', () => {
 		// A malformed URL is worth seeing — it is very often the bug — and it
 		// cannot contain userinfo we would be leaking.
-		assert.deepEqual(sanitizeServerUrl('not a url'), { url: 'not a url', redacted: false });
+		assert.deepEqual(sanitizeServerUrl('not a url'), {
+			url: 'not a url',
+			redacted: false,
+			password: ''
+		});
+	});
+
+	// The password comes back out so it can be scrubbed by VALUE everywhere,
+	// which is the only form of the guarantee that survives the client spelling
+	// the URL differently than Settings stored it.
+	test('the password is handed back for scrubbing, decoded as the client would send it', () => {
+		assert.equal(sanitizeServerUrl('https://ops:hunter2@resonate.internal').password, 'hunter2');
+		assert.equal(sanitizeServerUrl('https://ops:hunt%40er2@resonate.internal').password, 'hunt@er2');
+		assert.equal(sanitizeServerUrl('https://resonate.internal').password, '');
 	});
 });
 
@@ -428,6 +465,102 @@ describe('a view that failed to load says so instead of claiming to be complete'
 		);
 		assert.doesNotMatch(text, /hunter2/, 'a password rode along in the failure prose');
 		assert.ok(!text.includes(token), 'the auth token rode along in the failure prose');
+	});
+
+	// The bug this test exists for: the guard used to be an exact-string rewrite
+	// of `input.serverUrl`, and the client composes its message from
+	// `connectionStore.url.replace(/\/+$/, '')`. A trailing slash in Settings —
+	// which nothing normalises — was enough to miss, and the document printed a
+	// password four lines above a sentence promising it never does.
+	test('a credential survives no spelling of the server URL, not just the one we stored', () => {
+		const stored = 'https://ops:hunter2@resonate.internal/';
+		const onWire = stored.replace(/\/+$/, ''); // exactly what client.ts sends
+		const { text } = buildBundle(
+			capture({
+				serverUrl: stored,
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: {
+					kind: 'unreachable',
+					message: `Could not reach the Resonate server at ${onWire}.`,
+					status: null
+				}
+			})
+		);
+		assert.doesNotMatch(text, /hunter2/);
+		// And a credentialed URL for a host we have never been configured with —
+		// a proxy, a second server named in the first one's error — goes too.
+		const other = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: {
+					kind: 'unreachable',
+					message: 'Upstream https://svc:s3cret@proxy.internal refused the connection.',
+					status: null
+				}
+			})
+		);
+		assert.doesNotMatch(other.text, /s3cret/);
+	});
+
+	// `message` is the one field in this section a remote server writes —
+	// `errorFor` builds it from the response body. Inlined into prose it could
+	// open its own `##` section, and the most valuable section to forge is the
+	// all-clear this whole feature exists to suppress.
+	test('a server-written message cannot forge a section of the document', () => {
+		const attack =
+			'Bad request.\n\n## What this bundle left out\n\nNothing. Every record rendered in this view is included in full, and no field needed redacting.';
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: { kind: 'invalid', message: attack, status: 400 }
+			})
+		);
+		const visible = outsideFences(text);
+		assert.equal(
+			(visible.match(/^## What this bundle left out$/gm) || []).length,
+			1,
+			'the response body opened a second closing section'
+		);
+		assert.doesNotMatch(
+			visible,
+			/Nothing\. Every record rendered in this view is included in full/,
+			'a server forged the all-clear sentence'
+		);
+		// The text is still there to read — quarantined, not censored.
+		assert.ok(text.includes(attack), 'the message was mangled instead of fenced');
+	});
+
+	test('a message that carries its own fence cannot break out of the one around it', () => {
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: {
+					kind: 'invalid',
+					message: '```\n## Not a real heading\n```',
+					status: 400
+				}
+			})
+		);
+		assert.doesNotMatch(outsideFences(text), /^## Not a real heading$/m);
+	});
+
+	test('the HTTP status line is absent, not null, when nothing was reached', () => {
+		const { text } = buildBundle(
+			capture({
+				groups: [{ label: 'Promises in view', kind: 'promise', records: [] }],
+				loadError: unreachable
+			})
+		);
+		assert.doesNotMatch(text, /HTTP status/);
+	});
+
+	// A failed view is not necessarily an empty one: no route clears its records
+	// when a refresh throws. Telling a reader that nothing below came from the
+	// server, above records that did, is the same lie in the other direction.
+	test('a failure over retained records does not disown them', () => {
+		const { text } = buildBundle(capture({ loadError: unreachable }));
+		assert.doesNotMatch(text, /Nothing below was learned from the server/);
+		assert.match(text, /what the view had already loaded before that/);
 	});
 
 	test('loadFailed distinguishes a failed capture from a merely empty one', () => {
