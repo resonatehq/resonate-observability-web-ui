@@ -21,6 +21,7 @@
 			unreachable: 'Cannot reach the server',
 			unauthorized: 'Not authorized',
 			forbidden: 'Not permitted',
+			cloud_run_unauthorized: 'Cloud Run rejected this request',
 			not_found: 'Not found',
 			bad_request: 'The server rejected the request',
 			server_error: 'The server failed',
@@ -37,7 +38,7 @@
 	{#if error.remedy}
 		<p class="error-remedy">{error.remedy}</p>
 	{/if}
-	{#if error.kind === 'unreachable' || error.kind === 'unauthorized'}
+	{#if error.kind === 'unreachable' || error.kind === 'unauthorized' || error.kind === 'cloud_run_unauthorized'}
 		<a class="error-link" href="/settings">Open settings</a>
 	{/if}
 </div>
