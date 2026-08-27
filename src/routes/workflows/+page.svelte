@@ -20,6 +20,7 @@
 	import WorkflowGraph from '$lib/components/graph/WorkflowGraph.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import StaleNotice from '$lib/components/StaleNotice.svelte';
 	import AskAi from '$lib/components/AskAi.svelte';
 
 	interface WorkflowItem {
@@ -54,6 +55,21 @@
 	let pagesLoaded = $state(1);
 
 	let stateFilter = $state<PromiseState | ''>('');
+	/** When the cards were last loaded successfully, for the stale notice. */
+	let loadedAt = $state<number | null>(null);
+	/**
+	 * The filter the cards on screen actually satisfy, which is not
+	 * `stateFilter` once a filter change has failed to load.
+	 */
+	let appliedFilter = $state<PromiseState | ''>('');
+
+	/** Cards held from an earlier load, with the current one having failed. */
+	const stale = $derived(error !== null && workflows.length > 0 && loadedAt !== null);
+	const staleWhat = $derived(
+		appliedFilter !== stateFilter
+			? `workflows for ${appliedFilter ? `state “${appliedFilter}”` : 'all states'}, not the filter selected above,`
+			: 'these workflows'
+	);
 
 	/** A root promise changes identity for tree purposes when it settles. */
 	const stampOf = (p: PromiseRecord) => `${p.state}:${p.settledAt ?? ''}`;
@@ -107,11 +123,16 @@
 
 			cursor = lastCursor;
 			hasMore = !!lastCursor;
+			appliedFilter = stateFilter;
+			loadedAt = Date.now();
 			error = null;
 
 			void refreshTrees();
 		} catch (e) {
 			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
+			// Cards are kept and labelled rather than cleared — see StaleNotice.
+			// `appliedFilter` keeps what the cards ACTUALLY match, so a filter
+			// change that failed to load does not silently relabel them.
 		} finally {
 			loading = false;
 		}
@@ -275,6 +296,10 @@
 
 {#if error}
 	<ErrorPanel {error} />
+{/if}
+
+{#if stale && loadedAt !== null}
+	<StaleNotice since={loadedAt} what={staleWhat} />
 {/if}
 
 {#if loading && workflows.length === 0}

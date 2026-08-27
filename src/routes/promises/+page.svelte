@@ -9,6 +9,7 @@
 	} from '$lib/api/client';
 	import PromiseTable from '$lib/components/PromiseTable.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import StaleNotice from '$lib/components/StaleNotice.svelte';
 	import { stateLabel } from '$lib/utils/state';
 	import AskAi from '$lib/components/AskAi.svelte';
 
@@ -20,6 +21,26 @@
 	let loading = $state(true);
 	let cursor = $state<string | undefined>(undefined);
 	let hasMore = $state(false);
+	/** When the rows were last loaded successfully, for the stale notice. */
+	let loadedAt = $state<number | null>(null);
+	/**
+	 * The filter the rows on screen actually satisfy, which is not `stateFilter`
+	 * once a filter change has failed to load.
+	 */
+	let appliedFilter = $state<PromiseState | ''>('');
+
+	/** Rows held from an earlier load, with the current one having failed. */
+	const stale = $derived(error !== null && promises.length > 0 && loadedAt !== null);
+	/**
+	 * Names the mismatch when there is one. "These rows" is true but tame when
+	 * the rows are a different filter's rows — that is the case an operator is
+	 * most likely to misread.
+	 */
+	const staleWhat = $derived(
+		appliedFilter !== stateFilter
+			? `rows for ${appliedFilter ? `state “${appliedFilter}”` : 'all states'}, not the filter selected above,`
+			: 'these rows'
+	);
 
 	async function load(append = false) {
 		loading = true;
@@ -32,9 +53,16 @@
 			promises = append ? [...promises, ...result.promises] : result.promises;
 			cursor = result.cursor;
 			hasMore = !!result.cursor;
+			appliedFilter = stateFilter;
+			loadedAt = Date.now();
 			error = null;
 		} catch (e) {
 			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
+			// The rows stay — clearing them on a blip is worse for a view somebody
+			// is reading — but they are now labelled on screen, and `appliedFilter`
+			// keeps what the rows ACTUALLY match. Changing the filter while the
+			// server is unreachable used to leave resolved rows sitting under a
+			// `pending` selection with nothing saying the two disagreed.
 		} finally {
 			loading = false;
 		}
@@ -120,6 +148,10 @@
 
 {#if error}
 	<ErrorPanel {error} while="loading promises" />
+{/if}
+
+{#if stale && loadedAt !== null}
+	<StaleNotice since={loadedAt} what={staleWhat} />
 {/if}
 
 {#if loading && promises.length === 0}

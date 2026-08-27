@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { getSchedule, ApiError, decodeValueAsJson, type ScheduleRecord } from '$lib/api/client';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import StaleNotice from '$lib/components/StaleNotice.svelte';
 	import AskAi from '$lib/components/AskAi.svelte';
 
 	const scheduleId = $derived(page.params.id!);
@@ -9,18 +10,35 @@
 	let schedule = $state<ScheduleRecord | null>(null);
 	let loading = $state(true);
 	let error = $state<ApiError | null>(null);
+	/** When `schedule` was last loaded successfully, for the stale notice. */
+	let loadedAt = $state<number | null>(null);
 
 	async function load() {
+		const id = scheduleId;
 		loading = true;
 		try {
-			schedule = await getSchedule(scheduleId);
+			schedule = await getSchedule(id);
+			loadedAt = Date.now();
 			error = null;
 		} catch (e) {
 			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
+			// Identity, not age. This view refreshes every 5s, so a blip that
+			// cleared the record would blank a page somebody is watching — the held
+			// schedule is kept and labelled instead. But a record for a DIFFERENT id
+			// is discarded: navigating between two schedules where the second fails
+			// would otherwise render the first one's cron and payload under the
+			// second one's id.
+			if (schedule && schedule.id !== id) {
+				schedule = null;
+				loadedAt = null;
+			}
 		} finally {
 			loading = false;
 		}
 	}
+
+	/** Records held from an earlier load, with the current one having failed. */
+	const stale = $derived(error !== null && schedule !== null && loadedAt !== null);
 
 	$effect(() => {
 		load();
@@ -53,6 +71,14 @@
 			selection: null,
 			loadError: error,
 			notes: [
+				// The record, when one survives a failure, is guaranteed to be the id
+				// in this path — the catch discards anything else — so this says
+				// "stale", never "a different schedule".
+				...(stale && loadedAt !== null
+					? [
+							`The latest refresh of this view failed. The schedule record below is \`${schedule?.id}\` as of ${new Date(loadedAt).toISOString()}, not a current answer — \`nextRunAt\` and \`lastRunAt\` in particular may have moved since.`
+						]
+					: []),
 				'This is the schedule, not its runs. The promises it has created are not in this bundle — the server does not link them back from the schedule record.',
 				'`promiseId` is a template: the fired promise gets an id derived from it, so it is not itself a promise id you can look up.',
 				'`nextRunAt` and `lastRunAt` are epoch milliseconds, and the server evaluates cron in UTC.',
@@ -65,6 +91,10 @@
 <div class="schedule-detail">
 	{#if error}
 		<ErrorPanel {error} while="loading this schedule" />
+	{/if}
+
+	{#if stale && loadedAt !== null}
+		<StaleNotice since={loadedAt} what="this schedule" />
 	{/if}
 
 	{#if loading && !schedule}
