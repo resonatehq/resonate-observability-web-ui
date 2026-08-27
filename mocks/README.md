@@ -169,7 +169,7 @@ the server accepts and then retries every 60 seconds forever.
 
 | File | |
 |---|---|
-| `protocol.mjs` | Protocol constants and seed data. Fixed timestamps, never `Date.now()`. |
+| `protocol.mjs` | Protocol constants and seed data. Timestamps hang off one anchor, never a mid-flight `Date.now()`. |
 | `server.mjs` | The server. Every rule cites the `resonatehq/resonate` line it came from. |
 | `server.test.mjs` | Conformance suite (`node:test`, no dependencies). |
 | `conformance.mjs` | Differential harness — runs the same probes anywhere. |
@@ -178,7 +178,8 @@ the server accepts and then retries every 60 seconds forever.
 ## Seed data
 
 Six workflow trees plus 120 filler promises, enough to force pagination past the
-default limit of 100:
+default limit of 100. The trees are named to sort ahead of the filler, because
+search is ordered by promise ID and the dashboard samples the first page:
 
 | Root | Shape |
 |---|---|
@@ -191,3 +192,18 @@ default limit of 100:
 
 Children carry `resonate:parent` and `resonate:origin` so both `buildTree` and
 `fetchTreePromises` work. Payloads are base64-encoded JSON, matching the server.
+
+The filler is a batch queue: opaque ids uncorrelated with time, spread evenly
+across the span, mostly resolved. Each of those three properties is load-bearing
+for what the dashboard shows, and the reasoning is in the comments around the
+filler block in `protocol.mjs`.
+
+### The clock
+
+Seed times hang off a single anchor, `FIXTURE_EPOCH`. Every test takes that fixed
+default, so output is reproducible and nothing asserts an absolute timestamp.
+
+The CLI anchors to the wall clock instead, so the newest record is "now": a
+fixture pinned to a fixed past renders as "379d ago" on every row and leaves the
+dashboard's last-hour throughput chart empty. Pass `--frozen` to take the fixed
+epoch on the CLI too.

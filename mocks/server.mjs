@@ -28,6 +28,8 @@ import { createServer } from 'node:http';
 import { serverAcceptsCron as isValidCron, serverNextRunAt as computeNextCron } from '../src/lib/utils/cron.js';
 import {
 	DEFAULT_SEARCH_LIMIT,
+	FIXTURE_EPOCH,
+	FIXTURE_SPAN_MS,
 	LEGACY_PATHS,
 	MAX_SEARCH_LIMIT,
 	PROMISE_STATES,
@@ -53,14 +55,16 @@ const errorEnvelope = (kind, corrId, status, message) =>
 
 // ─── Store ───────────────────────────────────────────────────────────────────
 
-export function createStore() {
-	// A deterministic monotonic clock, never Date.now(). Records created during
-	// a test run must be reproducible, and the seed data uses fixed timestamps
-	// for the same reason.
-	let tick = 1_755_100_000_000;
+export function createStore(t0 = FIXTURE_EPOCH) {
+	// A monotonic clock, never Date.now() mid-flight. Records created during a
+	// test run must be reproducible, which is why the anchor is an argument
+	// rather than a call to the wall clock: every test takes the fixed default,
+	// and only the CLI moves it (see parseArgs). The clock starts at the end of
+	// the seeded span so a promise created through the API is the newest record.
+	let tick = t0 + FIXTURE_SPAN_MS;
 	return {
-		promises: seedPromises(),
-		schedules: seedSchedules(),
+		promises: seedPromises(t0),
+		schedules: seedSchedules(t0),
 		clock: () => (tick += 1000)
 	};
 }
@@ -519,7 +523,7 @@ export function createMockServer(config = {}) {
 		// 'off' is the real server's default: no --auth-publickey, no checks.
 		mode: config.jwt ? 'jwt' : config.token != null ? 'token' : 'off'
 	};
-	const store = config.store ?? createStore();
+	const store = config.store ?? createStore(config.now ?? FIXTURE_EPOCH);
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url, 'http://localhost');
@@ -588,7 +592,19 @@ export function createMockServer(config = {}) {
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-	const out = { port: 8099, cors: [], token: null, prefix: '', latency: 0, jwt: false };
+	// The CLI anchors the seed data to the wall clock so the newest record is
+	// "now" — a running fixture should look like a running system. `--frozen`
+	// takes the fixed epoch the tests use, for anyone who wants byte-identical
+	// output across runs.
+	const out = {
+		port: 8099,
+		cors: [],
+		token: null,
+		prefix: '',
+		latency: 0,
+		jwt: false,
+		now: Date.now() - FIXTURE_SPAN_MS
+	};
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		const next = () => argv[++i];
@@ -598,6 +614,7 @@ function parseArgs(argv) {
 		else if (arg === '--prefix') out.prefix = next();
 		else if (arg === '--latency') out.latency = Number(next());
 		else if (arg === '--jwt') out.jwt = true;
+		else if (arg === '--frozen') out.now = FIXTURE_EPOCH;
 		else if (arg === '--help' || arg === '-h') out.help = true;
 		else throw new Error(`Unknown argument: ${arg}`);
 	}
@@ -610,7 +627,7 @@ if (isMain) {
 	const args = parseArgs(process.argv.slice(2));
 	if (args.help) {
 		console.log(
-			'Usage: node mocks/server.mjs [--port 8099] [--cors <origin>] [--token <t>] [--prefix <p>] [--jwt] [--latency <ms>]'
+			'Usage: node mocks/server.mjs [--port 8099] [--cors <origin>] [--token <t>] [--prefix <p>] [--jwt] [--latency <ms>] [--frozen]'
 		);
 		process.exit(0);
 	}
