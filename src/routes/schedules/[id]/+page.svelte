@@ -51,6 +51,7 @@
 				{ label: 'The schedule', kind: 'schedule', records: schedule ? [schedule] : [] }
 			],
 			selection: null,
+			loadError: error,
 			notes: [
 				'This is the schedule, not its runs. The promises it has created are not in this bundle — the server does not link them back from the schedule record.',
 				'`promiseId` is a template: the fired promise gets an id derived from it, so it is not itself a promise id you can look up.',

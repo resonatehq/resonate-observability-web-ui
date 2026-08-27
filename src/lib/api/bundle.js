@@ -133,6 +133,20 @@ const TALLY_SEP = '\u0000';
  * @property {{label: string, description: string, value: unknown} | null} [structure]
  *   Shape the flat record lists cannot carry — a workflow's parent/child tree, say.
  * @property {string[]} [secrets] Exact strings to scrub — in practice the auth token.
+ * @property {LoadFailure | null} [loadError]
+ *   Set when the view is rendering an error rather than data. A view that leaves
+ *   this out while showing an error panel produces a bundle asserting the server
+ *   is empty, which is worse than no bundle at all: the reader cannot tell.
+ */
+
+/**
+ * The failure a view is rendering, in the shape `ApiError` already carries.
+ *
+ * @typedef {object} LoadFailure
+ * @property {string} kind      Failure class, e.g. `unreachable`, `not-found`.
+ * @property {string} message   What the client said went wrong.
+ * @property {string} [remedy]  Operator-facing next step, when there is one.
+ * @property {number | null} [status] HTTP status, absent when nothing was reached.
  */
 
 /**
@@ -142,6 +156,7 @@ const TALLY_SEP = '\u0000';
  * @property {boolean} hasPayload Whether any included record carries payload bytes.
  * @property {string[]} truncations Human lines, one per cap that bound.
  * @property {string[]} redactions  Human lines, one per redaction that fired.
+ * @property {boolean} loadFailed Whether this bundle describes a view that failed to load.
  * @property {number} bytes       UTF-8 size of `text`.
  */
 
@@ -151,19 +166,69 @@ const TALLY_SEP = '\u0000';
  * does not parse is returned as-is rather than dropped — a malformed server URL
  * is worth seeing, and it cannot contain a password we would be leaking.
  *
+ * Returns the password separately as well, so it can be scrubbed BY VALUE
+ * wherever else it turns up. Rewriting the one string we expect it to appear in
+ * is not enough: the client composes its failure message from a normalised copy
+ * of this URL, so a rewrite keyed on the configured spelling misses on
+ * something as small as a trailing slash — and then prints the password under a
+ * closing line promising it is never included.
+ *
  * @param {string} url
- * @returns {{url: string, redacted: boolean}}
+ * @returns {{url: string, redacted: boolean, password: string}}
  */
 export function sanitizeServerUrl(url) {
 	try {
 		const parsed = new URL(url);
-		if (!parsed.username && !parsed.password) return { url, redacted: false };
+		if (!parsed.username && !parsed.password)
+			return { url, redacted: false, password: '' };
+		const password = decodeURIComponent(parsed.password);
 		parsed.username = '';
 		parsed.password = '';
-		return { url: parsed.toString(), redacted: true };
+		return { url: parsed.toString(), redacted: true, password };
 	} catch {
-		return { url, redacted: false };
+		return { url, redacted: false, password: '' };
 	}
+}
+
+/**
+ * Removes the `user:password@` from any URL in a string, whatever host it names
+ * and however it is spelled. This runs alongside the by-value scrub rather than
+ * instead of it: by-value catches this server's password anywhere in the
+ * document, and this catches a credentialed URL the value list has never seen —
+ * a proxy, a second server named in an error from the first.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripUrlUserinfo(text) {
+	return text.replace(/(\bhttps?:\/\/)[^\s/@]+@/gi, '$1«redacted: credentials in a URL»@');
+}
+
+/**
+ * Makes a value safe to sit inside a markdown inline code span. A backtick in
+ * the value would otherwise close the span early and let the rest render as
+ * markup.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+function codeSpan(value) {
+	return value.replace(/`/g, "'").replace(/\r?\n/g, ' ');
+}
+
+/**
+ * Wraps remote-written text in a fence long enough that the text cannot end it.
+ * Anything shorter is an injection point: a response body containing its own
+ * fence, heading or list re-shapes a document whose credibility rests on the
+ * reader being able to tell what the console said from what a server said.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function fenced(text) {
+	const longestRun = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+	const fence = '`'.repeat(Math.max(3, longestRun + 1));
+	return [`${fence}text`, text, fence];
 }
 
 /**
@@ -186,7 +251,11 @@ function shape(path) {
  * argument so the tallies cannot be forgotten at a call site — every scrub in
  * one bundle shares one set of counters, and the report is built from those.
  *
- * @param {string[]} secrets
+ * @param {(string | {value: string, label: string})[]} secrets
+ *   A bare string is the console's auth token. The labelled form exists so a
+ *   different kind of credential is not reported as one — an operator reading
+ *   "it contained this console's auth token" about their URL password would go
+ *   and rotate the wrong secret.
  */
 function createScrubber(secrets) {
 	/** @type {Map<string, {count: number, largest: number}>} */
@@ -197,8 +266,10 @@ function createScrubber(secrets) {
 	const dropped = new Map();
 	let sawPayload = false;
 
-	/** Non-empty strings only: scrubbing on `''` would replace every gap. */
-	const live = secrets.filter((s) => typeof s === 'string' && s.length > 0);
+	/** Non-empty values only: scrubbing on `''` would replace every gap. */
+	const live = secrets
+		.map((s) => (typeof s === 'string' ? { value: s, label: "this console's auth token" } : s))
+		.filter((s) => s && typeof s.value === 'string' && s.value.length > 0);
 
 	/**
 	 * @param {string} text
@@ -208,9 +279,9 @@ function createScrubber(secrets) {
 	function scrubText(text, path) {
 		let out = text;
 		for (const secret of live) {
-			if (out.includes(secret)) {
-				out = out.split(secret).join('«redacted: this console\'s auth token»');
-				bump(redacted, `${shape(path)}${TALLY_SEP}it contained this console's auth token`);
+			if (out.includes(secret.value)) {
+				out = out.split(secret.value).join(`«redacted: ${secret.label}»`);
+				bump(redacted, `${shape(path)}${TALLY_SEP}it contained ${secret.label}`);
 			}
 		}
 		if (JWT_SHAPE.test(out)) {
@@ -358,7 +429,7 @@ function prettyIfJson(text) {
  *
  * @param {RecordGroup[]} groups
  * @param {{label: string, record: unknown} | null | undefined} selection
- * @param {string[]} secrets
+ * @param {(string | {value: string, label: string})[]} secrets
  * @returns {{entries: string[], notes: string[]}}
  */
 function decodedAppendix(groups, selection, secrets) {
@@ -399,8 +470,12 @@ function decodedAppendix(groups, selection, secrets) {
 				clipped = true;
 				text = text.slice(0, BUNDLE_LIMITS.decoded);
 			}
-			for (const secret of secrets.filter(Boolean)) {
-				text = text.split(secret).join('«redacted: this console\'s auth token»');
+			for (const secret of secrets) {
+				const value = typeof secret === 'string' ? secret : secret?.value;
+				const label =
+					typeof secret === 'string' ? "this console's auth token" : (secret?.label ?? 'a secret');
+				if (!value) continue;
+				text = text.split(value).join(`«redacted: ${label}»`);
 			}
 			text = text.replace(JWT_SHAPE, '«redacted: JWT»');
 			JWT_SHAPE.lastIndex = 0;
@@ -529,9 +604,20 @@ export function buildBundle(input) {
  * @returns {Bundle}
  */
 function render(input, cap) {
-	const secrets = input.secrets ?? [];
-	const scrubber = createScrubber(secrets);
 	const server = sanitizeServerUrl(input.serverUrl);
+	// The URL password joins the secrets list rather than being rewritten in the
+	// one string we expect it in, so it is removed by value wherever it appears —
+	// prose, a record, a decoded payload. The username is deliberately not on the
+	// list: it is short, often a common word, and scrubbing `ops` by value would
+	// eat the middle of unrelated text. The header still strips it, and
+	// `stripUrlUserinfo` removes it from any URL in the error prose.
+	const secrets = [
+		...(input.secrets ?? []),
+		...(server.password
+			? [{ value: server.password, label: 'a password embedded in the server URL' }]
+			: [])
+	];
+	const scrubber = createScrubber(secrets);
 
 	/** @type {string[]} */
 	const truncations = [];
@@ -545,12 +631,56 @@ function render(input, cap) {
 		`**View:** ${input.view} (\`${input.path}\`)  `,
 		`**Server:** \`${server.url || '(not set)'}\`  `,
 		`**Captured:** ${input.capturedAt}`,
-		'',
-		'## What you are looking at',
-		'',
-		SCHEMA_NOTE,
 		''
 	);
+
+	const failure = input.loadError ?? null;
+	// Whether anything survived from an earlier load. A failed view is not
+	// necessarily an empty one: no route clears its records when a refresh or a
+	// filter change throws, so a detail page can be holding a record from a poll
+	// five seconds ago. Saying "nothing was learned from the server" above real
+	// records is the same class of lie this section exists to stop.
+	const holdsRecords = input.groups.some((g) => g.records.length > 0);
+	const clean = (/** @type {string} */ text) =>
+		String(scrubber.scrub(stripUrlUserinfo(text), 'loadError'));
+
+	if (failure) {
+		// Ahead of the schema note and everything else: a reader who stops after
+		// the first section must still have learned the one thing that changes how
+		// to read the rest.
+		sections.push(
+			'## This view failed to load',
+			'',
+			holdsRecords
+				? '**The request behind this view failed.** Anything below is what the view had already ' +
+					'loaded before that — it may be stale, and it is not a current answer, but it is not ' +
+					'invented either.'
+				: '**The request behind this view failed, so what follows is an error state — not the ' +
+					"server's contents.** Nothing below was learned from the server on this attempt.",
+			'',
+			`- **Failure:** \`${codeSpan(clean(failure.kind))}\``
+		);
+		if (failure.status != null) {
+			sections.push(`- **HTTP status:** ${failure.status}`);
+		}
+		// Fenced, not inlined. `message` is the one field here a remote server
+		// writes — `errorFor` builds it from the response body — and pasted into
+		// prose it can open its own `##` section. A body ending in the all-clear
+		// sentence this whole section exists to prevent renders as a second
+		// "What this bundle left out", and the reader has no way to tell which one
+		// the console wrote.
+		sections.push('', '**What the console reported:**', '', ...fenced(clean(failure.message)), '');
+		if (failure.remedy) {
+			// Its own block rather than a bullet: the client's remedies are
+			// multi-line and carry an indented command, which inside a list item
+			// silently ends the list and leaves the rest of the advice dangling
+			// outside it. Left as prose because this string is written here in the
+			// app, not by whatever answered the request.
+			sections.push('**Suggested next step:**', '', clean(failure.remedy), '');
+		}
+	}
+
+	sections.push('## What you are looking at', '', SCHEMA_NOTE, '');
 
 	if (input.notes?.length) {
 		sections.push('## About this view', '', ...input.notes.map((n) => `- ${n}`), '');
@@ -640,18 +770,40 @@ function render(input, cap) {
 		allRedactions.push('Removed a username and password embedded in the server URL.');
 	}
 
+	// The load failure is the largest thing a failed bundle left out, so it is
+	// named here as well as at the top — this is the section a reader is told to
+	// check before reading anything into an absence, and it is the one place the
+	// old document actively lied: with no caps and no redactions, a view that
+	// never reached the server reported "Nothing".
+	/** @type {string[]} */
+	const failures = [];
+	if (failure) {
+		// `clean` here too, not raw interpolation: the rule this file is built on
+		// is that a secret is nowhere in the document, not that it was replaced at
+		// the path we thought of.
+		const kind = codeSpan(clean(failure.kind));
+		failures.push(
+			recordCount === 0
+				? `**Every record this view would have shown.** The \`${kind}\` failure above means none were loaded. Judge what exists from that failure and its kind, not from the empty lists here — they are empty because the request failed.`
+				: `**Whatever the failed request would have added.** The \`${kind}\` failure above means ${recordCount === 1 ? 'the single record here is' : `the ${recordCount} records here are`} what the view already had, not a complete or current answer.`
+		);
+	}
+
 	sections.push(
 		'## What this bundle left out',
 		'',
 		'Read this before concluding anything from an absence.',
 		''
 	);
-	if (allTruncations.length === 0 && allRedactions.length === 0) {
+	if (failures.length === 0 && allTruncations.length === 0 && allRedactions.length === 0) {
 		sections.push(
 			'Nothing. Every record rendered in this view is included in full, and no field needed redacting.',
 			''
 		);
 	} else {
+		if (failures.length > 0) {
+			sections.push('**Not loaded:**', '', ...failures.map((f) => `- ${f}`), '');
+		}
 		if (allTruncations.length > 0) {
 			sections.push('**Bounded:**', '', ...allTruncations.map((t) => `- ${t}`), '');
 		}
@@ -676,6 +828,7 @@ function render(input, cap) {
 		hasPayload: scrubber.hasPayload,
 		truncations: allTruncations,
 		redactions: allRedactions,
+		loadFailed: failure !== null,
 		bytes: new TextEncoder().encode(text).length
 	};
 }

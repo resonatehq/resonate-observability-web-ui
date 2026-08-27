@@ -61,13 +61,27 @@
 			},
 			groups: [{ label: 'Promises in view', kind: 'promise', records: promises }],
 			selection: null,
+			loadError: error,
 			notes: [
+				// The filter note states a REASON for absence. On a failed load that
+				// reason is wrong — and a filter change whose request throws leaves
+				// the previous filter's rows on screen, so the records visibly do not
+				// obey the filter the note says produced them.
 				stateFilter
-					? `Filtered to state \`${stateFilter}\`. The server's filter is an exact match, so the other four states are absent by request, not because none exist.`
+					? error
+						? `\`${stateFilter}\` is the filter selected in the UI, but the request that would have applied it failed. The records below are whatever the view held before, and they may not match it.`
+						: `Filtered to state \`${stateFilter}\`. The server's filter is an exact match, so the other four states are absent by request, not because none exist.`
 					: 'Unfiltered — every state the page reached is here.',
-				hasMore
-					? `These are the first ${promises.length} promises by id, and the server has more. Ordering is by id because the server offers no sort, so this is not "the most recent".`
-					: `All ${promises.length} matching promises the server holds. Ordering is by id — the server offers no sort.`
+				// Only a page that actually got an answer may say what the server
+				// holds. On a failed load the count is zero because the request
+				// failed, and "all N the server holds" would state the opposite.
+				...(error
+					? []
+					: [
+							hasMore
+								? `These are the first ${promises.length} promises by id, and the server has more. Ordering is by id because the server offers no sort, so this is not "the most recent".`
+								: `All ${promises.length} matching promises the server holds. Ordering is by id — the server offers no sort.`
+						])
 			]
 		};
 	}

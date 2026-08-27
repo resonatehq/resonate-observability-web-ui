@@ -46,8 +46,17 @@
 				}
 			],
 			selection: null,
+			loadError: error,
 			notes: [
-				`Every figure on this dashboard is counted in the browser over a sample of ${dashboardStore.sampleSize} promises, not reported by the server. ${dashboardStore.sampleTruncated ? 'The server holds more promises than this sample covers, so these are not totals.' : 'The sample covered every promise the server returned.'}`,
+				// Three states. The store keeps the last good sample when a poll
+				// fails, so "counted over no promises at all" would contradict the
+				// stats and records in the same document; and the unqualified form
+				// claims a reach the failed poll never had.
+				!error
+					? `Every figure on this dashboard is counted in the browser over a sample of ${dashboardStore.sampleSize} promises, not reported by the server. ${dashboardStore.sampleTruncated ? 'The server holds more promises than this sample covers, so these are not totals.' : 'The sample covered every promise the server returned.'}`
+					: dashboardStore.promises.length > 0
+						? `Every figure on this dashboard is counted in the browser, not reported by the server, over the ${dashboardStore.sampleSize} promises the last successful poll returned. This capture is of a failed refresh, so they are not current.`
+						: 'Every figure on this dashboard is counted in the browser, not reported by the server — and no poll has succeeded, so they are counted over no promises at all.',
 				'The sample is the first page of a search with no sort — the server offers none — so it is the first N promises by id, not the most recent.'
 			]
 		};
