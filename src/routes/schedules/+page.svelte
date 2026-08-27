@@ -4,6 +4,7 @@
 	import ScheduleTable from '$lib/components/ScheduleTable.svelte';
 	import ScheduleForm from '$lib/components/ScheduleForm.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import StaleNotice from '$lib/components/StaleNotice.svelte';
 	import AskAi from '$lib/components/AskAi.svelte';
 
 	let schedules: ScheduleRecord[] = $state([]);
@@ -13,6 +14,11 @@
 	let hasMore = $state(false);
 	let showForm = $state(false);
 	let created = $state<ScheduleRecord | null>(null);
+	/** When the rows were last loaded successfully, for the stale notice. */
+	let loadedAt = $state<number | null>(null);
+
+	/** Rows held from an earlier load, with the current one having failed. */
+	const stale = $derived(error !== null && schedules.length > 0 && loadedAt !== null);
 
 	/**
 	 * Both ways out of the form unmount the control that was focused — the
@@ -38,9 +44,11 @@
 			schedules = append ? [...schedules, ...result.schedules] : result.schedules;
 			cursor = result.cursor;
 			hasMore = !!result.cursor;
+			loadedAt = Date.now();
 			error = null;
 		} catch (e) {
 			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
+			// Rows are kept and labelled rather than cleared — see StaleNotice.
 		} finally {
 			loading = false;
 		}
@@ -127,6 +135,10 @@
 
 {#if error}
 	<ErrorPanel {error} while="loading schedules" />
+{/if}
+
+{#if stale && loadedAt !== null}
+	<StaleNotice since={loadedAt} what="these schedules" />
 {/if}
 
 {#if loading && schedules.length === 0}

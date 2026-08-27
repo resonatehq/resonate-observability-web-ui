@@ -16,6 +16,7 @@
 	import TimelineView from '$lib/components/timeline/TimelineView.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import StaleNotice from '$lib/components/StaleNotice.svelte';
 	import AskAi from '$lib/components/AskAi.svelte';
 	import { treeOutline } from '$lib/api/bundle.js';
 
@@ -27,6 +28,8 @@
 	let activeTab: 'graph' | 'timeline' | 'list' = $state('graph');
 	let totalSteps = $state(0);
 	let completedSteps = $state(0);
+	/** When `root` was last loaded successfully, for the stale notice. */
+	let loadedAt = $state<number | null>(null);
 
 	async function loadTree(rootId: string, isRefresh = false) {
 		// Only show loading spinner on initial load, not on refresh
@@ -51,9 +54,22 @@
 				root.expanded = true;
 				countSteps(root);
 			}
+			loadedAt = Date.now();
 			error = null;
 		} catch (e) {
 			error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
+			// Identity, not age. This view refreshes every 5s, so a held tree is
+			// kept and labelled rather than blanked on a blip. A tree built for a
+			// DIFFERENT root is discarded: navigating between two workflows where
+			// the second fails would otherwise render the first workflow's graph,
+			// timeline and step counts under the second one's id.
+			if (root && root.promise.id !== rootId) {
+				root = null;
+				selectedPromise = null;
+				totalSteps = 0;
+				completedSteps = 0;
+				loadedAt = null;
+			}
 		} finally {
 			loading = false;
 		}
@@ -133,6 +149,9 @@
 	let rootDuration = $derived(root ? computeDuration(root.promise) : null);
 	let allNodes = $derived<TreeNode[]>(root ? flattenTree(root) : []);
 
+	/** Records held from an earlier load, with the current one having failed. */
+	const stale = $derived(error !== null && root !== null && loadedAt !== null);
+
 	$effect(() => {
 		const id = page.params.id!;
 		loadTree(id, false); // Initial load
@@ -209,6 +228,10 @@
 
 	{#if error}
 		<ErrorPanel {error} while="loading this workflow" />
+	{/if}
+
+	{#if stale && loadedAt !== null}
+		<StaleNotice since={loadedAt} what="this call tree" />
 	{/if}
 
 	<div class="tab-bar">

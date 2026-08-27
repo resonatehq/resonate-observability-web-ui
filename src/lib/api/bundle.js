@@ -636,10 +636,16 @@ function render(input, cap) {
 
 	const failure = input.loadError ?? null;
 	// Whether anything survived from an earlier load. A failed view is not
-	// necessarily an empty one: no route clears its records when a refresh or a
-	// filter change throws, so a detail page can be holding a record from a poll
-	// five seconds ago. Saying "nothing was learned from the server" above real
+	// necessarily an empty one: a view keeps records that a failed refresh or
+	// filter change did not replace, so it can be holding rows from a poll five
+	// seconds ago. Saying "nothing was learned from the server" above real
 	// records is the same class of lie this section exists to stop.
+	//
+	// What a surviving record can no longer be is a record for something else.
+	// The id-keyed views discard anything whose id does not match the one in the
+	// path before they render, so "stale" here means old, never "a different
+	// promise". Both branches below stay live: the views that poll keep their
+	// records on failure by design, and label them on screen.
 	const holdsRecords = input.groups.some((g) => g.records.length > 0);
 	const clean = (/** @type {string} */ text) =>
 		String(scrubber.scrub(stripUrlUserinfo(text), 'loadError'));

@@ -4,12 +4,15 @@
 	import { formatDuration } from '$lib/utils/tree';
 	import Badge from '$lib/components/Badge.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import StaleNotice from '$lib/components/StaleNotice.svelte';
 	import AskAi from '$lib/components/AskAi.svelte';
 	import type { PromiseRecord } from '$lib/api/client';
 
 	let promise = $state<PromiseRecord | null>(null);
 	let error = $state<ApiError | null>(null);
 	let loading = $state(true);
+	/** When `promise` was last loaded successfully, for the stale notice. */
+	let loadedAt = $state<number | null>(null);
 
 	$effect(() => {
 		const id = page.params.id!;
@@ -17,15 +20,33 @@
 		getPromise(id)
 			.then((p) => {
 				promise = p;
+				loadedAt = Date.now();
 				error = null;
 			})
 			.catch((e) => {
 				error = e instanceof ApiError ? e : new ApiError('unknown', String(e), null);
+				// A failed load must never leave a record from a DIFFERENT id on
+				// screen. This route's `$effect` re-runs on `page.params.id` without
+				// remounting, so navigating from one promise to one that 404s used to
+				// render the previous promise's id, state and payloads underneath a
+				// "not found" panel — one entity presented as another.
+				//
+				// The test is identity, not age: a record still belonging to the id in
+				// the address bar is stale but true, and is kept and labelled. One that
+				// belongs to a different id is discarded, because there is no caption
+				// that makes it the right answer.
+				if (promise && promise.id !== id) {
+					promise = null;
+					loadedAt = null;
+				}
 			})
 			.finally(() => {
 				loading = false;
 			});
 	});
+
+	/** Records held from an earlier load, with the current one having failed. */
+	const stale = $derived(error !== null && promise !== null && loadedAt !== null);
 
 	/**
 	 * Payloads arrive base64-encoded. This page used to hand the raw encoded
@@ -70,15 +91,18 @@
 			selection: null,
 			loadError: error,
 			notes: [
-				// Three states, not two. The catch sets `error` without clearing
-				// `promise`, and the page renders both — so navigating from one id to
-				// one that 404s leaves the PREVIOUS promise on screen and in the
-				// bundle. A note calling that list empty is wrong, and a reader
-				// answering questions about this path from that record is worse.
+				// Three states, not two — a failed load here is not the same thing as
+				// an empty one, and a note calling the record list empty when it is
+				// not is what issue #12 was about.
+				//
+				// The record, when one survives, is now guaranteed to belong to the id
+				// in this path: the catch above discards anything else. So this reads
+				// "stale" and never "a different promise" — that branch used to exist
+				// here and is gone because the state it described can no longer occur.
 				!error
 					? 'One promise, fetched by id. Its parent and children are not here — this view does not load them.'
 					: promise
-						? `This view fetches one promise by id and the latest fetch failed, but the record below survives from an earlier one${promise.id !== page.params.id ? ` — and it is \`${promise.id}\`, **not** the \`${page.params.id}\` in this path` : ', so it may be stale'}. Its parent and children are never loaded by this view.`
+						? `This view fetches one promise by id and the latest fetch failed. The record below is \`${promise.id}\` as of an earlier successful load, so it may be stale — it is not a current answer. Its parent and children are never loaded by this view.`
 						: 'This view fetches one promise by id, and that fetch failed — see the failure named at the top. The empty record list follows from that failure; read its kind before concluding anything about whether this id exists. Its parent and children are never loaded by this view.'
 			]
 		};
@@ -93,6 +117,10 @@
 
 {#if error}
 	<ErrorPanel {error} while="loading this promise" />
+{/if}
+
+{#if stale && loadedAt !== null}
+	<StaleNotice since={loadedAt} what="this promise" />
 {/if}
 
 {#if loading}

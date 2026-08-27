@@ -5,6 +5,7 @@
 	import ActiveWorkflows from '$lib/components/dashboard/ActiveWorkflows.svelte';
 	import ErrorList from '$lib/components/dashboard/ErrorList.svelte';
 	import ErrorPanel from '$lib/components/ErrorPanel.svelte';
+	import StaleNotice from '$lib/components/StaleNotice.svelte';
 	import AskAi from '$lib/components/AskAi.svelte';
 
 	$effect(() => {
@@ -15,6 +16,8 @@
 	let stats = $derived(dashboardStore.stats);
 	let loading = $derived(dashboardStore.loading);
 	let error = $derived(dashboardStore.error);
+	let stale = $derived(dashboardStore.stale);
+	let loadedAt = $derived(dashboardStore.loadedAt);
 
 	/**
 	 * The computed stats go in alongside the records they were computed from.
@@ -86,6 +89,10 @@
 
 	{#if error}
 		<ErrorPanel {error} while="loading the dashboard" />
+	{/if}
+
+	{#if stale && loadedAt !== null}
+		<StaleNotice since={loadedAt} what="these figures" />
 	{/if}
 
 	{#if loading && dashboardStore.promises.length === 0}
