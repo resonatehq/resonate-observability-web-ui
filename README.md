@@ -20,10 +20,11 @@ docker run -p 8080:80 ghcr.io/resonatehq/resonate-ui:latest
 
 Open <http://localhost:8080> and set your server URL at `/settings`. The console is static files served by nginx — it talks to your Resonate server from the browser, so nothing about your server is configured into the image and one image works against any of them.
 
-Prefer your own web server? Each release also carries `resonate-ui-<version>.tar.gz`, which is the built site and nothing else — unpack it under any static host:
+Prefer your own web server? Each release also carries the built site as a tarball — versioned (`resonate-ui-<version>.tar.gz`) and as a stable name the `latest` URL can keep pointing at — unpack it under any static host:
 
 ```bash
-curl -L https://github.com/resonatehq/resonate-ui/releases/latest/download/resonate-ui-0.1.0.tar.gz \
+mkdir -p /var/www/resonate-ui
+curl -L https://github.com/resonatehq/resonate-ui/releases/latest/download/resonate-ui.tar.gz \
   | tar -xz -C /var/www/resonate-ui
 ```
 
@@ -137,7 +138,7 @@ The fixture under `mocks/` is not a sketch of the protocol. It is checked agains
 
 | Check | Result |
 |---|---|
-| `npm test` | **275 tests** |
+| `npm test` | **297 tests** |
 | `npm run conformance <url>` — protocol probes, mock vs live 0.9.8 | **92 of 92 identical** |
 | `npm run cron-differential <url>` — cron expressions, mock vs live 0.9.8 | **563 expressions, 0 mismatches** |
 

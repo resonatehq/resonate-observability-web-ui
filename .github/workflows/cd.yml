@@ -41,15 +41,20 @@ jobs:
       # because nothing is published to a registry that would read it. Guard
       # against a tag that is not a version, so the asset cannot be named
       # something like `resonate-ui-fix-typo.tar.gz`.
+      #
+      # The tag reaches the shell through `env`, never by template interpolation
+      # into `run:` — a tag is maintainer-controlled here, but `v1.0.0$(cmd)` is
+      # a valid git tag and interpolation would execute it. The grep is anchored
+      # for the same reason: a case glob like [0-9]*.[0-9]*.[0-9]* admits
+      # `1.2.3$(cmd)`.
       - name: resolve version
         id: version
+        env:
+          RAW_VERSION: ${{ github.event.release.tag_name || inputs.version }}
         run: |
-          raw="${{ github.event.release.tag_name || inputs.version }}"
-          version="${raw#v}"
-          case "$version" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "not a version: '$raw'"; exit 1 ;;
-          esac
+          version="${RAW_VERSION#v}"
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+            || { echo "not a version: '$RAW_VERSION'"; exit 1; }
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
       - name: install
@@ -67,11 +72,19 @@ jobs:
       - name: build
         run: npm run build
 
+      # Two names for the same bytes: the versioned one is the artifact of
+      # record, and the unversioned one exists so that
+      # `releases/latest/download/resonate-ui.tar.gz` keeps working across
+      # releases — a versioned filename under a `latest` URL goes stale the
+      # moment the next release lands. Each .sha256 names the file it sits
+      # beside, so `sha256sum -c` works on either pair as downloaded.
       - name: package
         run: |
           tar -czf "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" -C build .
           sha256sum "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" \
             > "resonate-ui-${{ steps.version.outputs.value }}.tar.gz.sha256"
+          cp "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" resonate-ui.tar.gz
+          sha256sum resonate-ui.tar.gz > resonate-ui.tar.gz.sha256
 
       # Prove the tarball is a complete, servable site before it is attached.
       # A build that produced an empty or partial `build/` still tars and
@@ -97,7 +110,14 @@ jobs:
           entry=$(curl -s http://127.0.0.1:8099/ \
             | grep -o '/_app/immutable/entry/[^"]*\.js' | head -1)
           test -n "$entry" || { echo "index.html references no entry bundle"; exit 1; }
-          curl -sf -o /dev/null "http://127.0.0.1:8099$entry" \
+
+          # `serve -s` is SPA-fallback mode: a MISSING entry bundle is answered
+          # with index.html and a 200, so an HTTP status can never fail here.
+          # The fetched bytes are compared against the unpacked file instead —
+          # which also fails if the fallback swallowed it, because then the
+          # response is HTML and the file does not exist.
+          curl -s -o /tmp/entry.fetched "http://127.0.0.1:8099$entry"
+          cmp -s /tmp/entry.fetched "$work$entry" \
             || { echo "entry bundle $entry is missing from the tarball"; exit 1; }
 
           echo "the unpacked tarball serves index.html and its entry bundle"
@@ -106,10 +126,13 @@ jobs:
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "$TAG" \
             "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" \
             "resonate-ui-${{ steps.version.outputs.value }}.tar.gz.sha256" \
+            resonate-ui.tar.gz \
+            resonate-ui.tar.gz.sha256 \
             --clobber
 
   # Separate job because it shares nothing with the one above: the image builds
@@ -125,15 +148,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same env-not-interpolation and anchored-regex reasoning as the job above.
       - name: resolve version
         id: version
+        env:
+          RAW_VERSION: ${{ github.event.release.tag_name || inputs.version }}
         run: |
-          raw="${{ github.event.release.tag_name || inputs.version }}"
-          version="${raw#v}"
-          case "$version" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "not a version: '$raw'"; exit 1 ;;
-          esac
+          version="${RAW_VERSION#v}"
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
+            || { echo "not a version: '$RAW_VERSION'"; exit 1; }
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v3
