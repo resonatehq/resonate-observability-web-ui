@@ -6,11 +6,30 @@
 
 Resonate records each step of a durable execution as a promise. This console reads those promises back and reassembles them, so a workflow that fell over at 3am arrives as a picture with a reason attached rather than a query you have to know how to write.
 
-> **Early stage.** Under active development, with real gaps listed under [Known limitations](#known-limitations). [File an issue](https://github.com/resonatehq/resonate-observability-web-ui/issues) or [contribute a fix](CONTRIBUTING.md).
+> **Early stage.** Under active development, with real gaps listed under [Known limitations](#known-limitations). [File an issue](https://github.com/resonatehq/resonate-ui/issues) or [contribute a fix](CONTRIBUTING.md).
 
 ---
 
 ## Quick start
+
+Point the container at nothing in particular and open it:
+
+```bash
+docker run -p 8080:80 ghcr.io/resonatehq/resonate-ui:latest
+```
+
+Open <http://localhost:8080> and set your server URL at `/settings`. The console is static files served by nginx — it talks to your Resonate server from the browser, so nothing about your server is configured into the image and one image works against any of them.
+
+Prefer your own web server? Each release also carries `resonate-ui-<version>.tar.gz`, which is the built site and nothing else — unpack it under any static host:
+
+```bash
+curl -L https://github.com/resonatehq/resonate-ui/releases/latest/download/resonate-ui-0.1.0.tar.gz \
+  | tar -xz -C /var/www/resonate-ui
+```
+
+Two rules if you serve it yourself: unknown paths must fall back to `index.html` (every route is client-rendered, so `/promises/<id>` has no file behind it), and paths under `/_app/` must **not** — a missing hashed asset needs to 404 rather than receive HTML, which the browser would otherwise report as a module parse error. [`docker/nginx.conf`](docker/nginx.conf) is a worked example of both.
+
+### From source
 
 Two terminals, and you do not need a server to see it working:
 
@@ -85,11 +104,14 @@ Both themes carry the same status palette, and every badge pair clears WCAG AA a
 
 Set the URL at `/settings` and press **Test connection**, which reports whether the server answered and whether your token was accepted, as two separate facts.
 
-**CORS.** Your browser calls the server directly, so the server has to allow this page's origin:
+**CORS.** Your browser calls the server directly, so the server has to allow this page's origin — which is the origin the console is served from, not the one in this example:
 
 ```bash
-resonate serve --server-cors-allow-origin http://localhost:5173
+resonate serve --server-cors-allow-origin http://localhost:5173   # npm run dev
+resonate serve --server-cors-allow-origin http://localhost:8080   # the container above
 ```
+
+`/settings` prints the exact flag for wherever you have it open.
 
 A rejected preflight never reaches the server and arrives back in the browser with no status code at all. **Test connection** tells you when that is what happened.
 

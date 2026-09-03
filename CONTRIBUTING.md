@@ -4,7 +4,7 @@ Thanks for your interest in contributing! This project is in its early stages an
 
 ## Reporting Issues
 
-Found a bug or have a feature request? [Open an issue](https://github.com/resonatehq/resonate-observability-web-ui/issues/new).
+Found a bug or have a feature request? [Open an issue](https://github.com/resonatehq/resonate-ui/issues/new).
 
 When reporting a bug, please include:
 
@@ -24,8 +24,8 @@ When requesting a feature:
 
 ```bash
 # Clone the repo
-git clone https://github.com/resonatehq/resonate-observability-web-ui.git
-cd resonate-observability-web-ui
+git clone https://github.com/resonatehq/resonate-ui.git
+cd resonate-ui
 
 # Install dependencies
 npm install
@@ -63,7 +63,7 @@ You'll need a running [Resonate server](https://github.com/resonatehq/resonate) 
 ## Community
 
 - **Discord** — Join the [Resonate Discord](https://discord.gg/AHGHZPrDH3) to chat with the team
-- **Discussions** — Use [GitHub Discussions](https://github.com/resonatehq/resonate-observability-web-ui/discussions) for questions and ideas
+- **Discussions** — Use [GitHub Discussions](https://github.com/resonatehq/resonate-ui/discussions) for questions and ideas
 
 ## License
 

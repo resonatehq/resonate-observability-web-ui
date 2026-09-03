@@ -1,0 +1,231 @@
+name: cd
+
+on:
+  release:
+    types: [released]
+  # Manual runs build, test and verify everything but do not attach assets or
+  # push images, so the pipeline itself can be exercised without cutting a
+  # release. `version` stands in for the tag the release trigger would supply.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build as (e.g. 0.1.0). Nothing is published."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/resonate-ui
+
+jobs:
+  # One job for the static artifact: every check that can reject a bad release
+  # runs before anything is attached, so nothing ships if any of them fail. The
+  # asset uploaded is exactly the tarball this job unpacked and served.
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the tarball to the release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The release tag is the only place this build's version is written down
+      # — package.json stays at whatever it says and is not the source of truth,
+      # because nothing is published to a registry that would read it. Guard
+      # against a tag that is not a version, so the asset cannot be named
+      # something like `resonate-ui-fix-typo.tar.gz`.
+      - name: resolve version
+        id: version
+        run: |
+          raw="${{ github.event.release.tag_name || inputs.version }}"
+          version="${raw#v}"
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "not a version: '$raw'"; exit 1 ;;
+          esac
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: install
+        run: npm ci
+
+      # The same three gates CI enforces on every PR. They run again here
+      # because a release can be cut from a tag whose CI predates a dependency
+      # change, and this is the last point before an artifact is published.
+      - name: typecheck
+        run: npm run check
+
+      - name: protocol conformance (mock fixture)
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+      - name: package
+        run: |
+          tar -czf "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" -C build .
+          sha256sum "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" \
+            > "resonate-ui-${{ steps.version.outputs.value }}.tar.gz.sha256"
+
+      # Prove the tarball is a complete, servable site before it is attached.
+      # A build that produced an empty or partial `build/` still tars and
+      # uploads happily; what catches that is unpacking the archive somewhere
+      # else and serving it. The entry bundle is read out of the shipped
+      # index.html rather than hardcoded, so this follows the real reference
+      # graph instead of asserting a filename that changes every build.
+      - name: verify the tarball serves
+        run: |
+          work=$(mktemp -d)
+          tar -xzf "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" -C "$work"
+          test -f "$work/index.html" || { echo "no index.html in the tarball"; exit 1; }
+
+          npx --yes serve -s "$work" -l 8099 >/tmp/serve.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:8099/ && break
+            sleep 1
+          done
+
+          curl -sf -o /dev/null http://127.0.0.1:8099/ \
+            || { echo "the unpacked site did not serve /"; cat /tmp/serve.log; exit 1; }
+
+          entry=$(curl -s http://127.0.0.1:8099/ \
+            | grep -o '/_app/immutable/entry/[^"]*\.js' | head -1)
+          test -n "$entry" || { echo "index.html references no entry bundle"; exit 1; }
+          curl -sf -o /dev/null "http://127.0.0.1:8099$entry" \
+            || { echo "entry bundle $entry is missing from the tarball"; exit 1; }
+
+          echo "the unpacked tarball serves index.html and its entry bundle"
+
+      - name: attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "resonate-ui-${{ steps.version.outputs.value }}.tar.gz" \
+            "resonate-ui-${{ steps.version.outputs.value }}.tar.gz.sha256" \
+            --clobber
+
+  # Separate job because it shares nothing with the one above: the image builds
+  # its own copy of the app inside the Dockerfile (so the published image is
+  # reproducible from the repo alone, not from an artifact handoff), and it
+  # pushes to a different place under different credentials.
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve version
+        id: version
+        run: |
+          raw="${{ github.event.release.tag_name || inputs.version }}"
+          version="${raw#v}"
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "not a version: '$raw'"; exit 1 ;;
+          esac
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # GITHUB_TOKEN with packages:write is enough for GHCR — no secret to
+      # provision for this pipeline to work.
+      - name: log in to ghcr
+        if: github.event_name == 'release'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Build the amd64 image into the local daemon FIRST and drive it, before
+      # anything is pushed. `docker/build-push-action` cannot both load an image
+      # and build multi-arch in one step, so the smoke test runs on the single
+      # architecture the runner can execute, and the multi-arch push below
+      # reuses its cache rather than rebuilding from scratch.
+      - name: build for smoke test (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: resonate-ui:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # An image that starts and 200s on / can still be broken in the two ways
+      # this config exists to prevent, so both are asserted rather than assumed:
+      # a cold deep link must boot the SPA, and a missing hashed asset must 404
+      # rather than be answered with index.html (which reaches the browser as an
+      # unexplained module parse error). The healthcheck is included because it
+      # resolves a hostname inside the container, which is exactly the kind of
+      # thing that passes locally and fails in a different network namespace.
+      - name: smoke test the image
+        run: |
+          docker run -d --name smoke -p 8188:80 resonate-ui:smoke
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:8188/ && break
+            sleep 1
+          done
+
+          fail() { echo "FAIL: $1"; docker logs smoke; docker rm -f smoke >/dev/null; exit 1; }
+
+          code() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
+
+          [ "$(code http://127.0.0.1:8188/)" = 200 ] || fail "/ did not serve 200"
+
+          # Cold deep link: no file exists at this path, the SPA fallback must
+          # answer it with the app.
+          [ "$(code http://127.0.0.1:8188/promises/checkout-7f3a)" = 200 ] \
+            || fail "a cold deep link did not serve the app"
+          curl -s http://127.0.0.1:8188/promises/checkout-7f3a | grep -q '<!doctype html>' \
+            || fail "the deep link response was not the app shell"
+
+          # A missing hashed asset must 404, not fall back to index.html.
+          [ "$(code http://127.0.0.1:8188/_app/immutable/nope.js)" = 404 ] \
+            || fail "a missing hashed asset was answered with the fallback"
+
+          # The entry bundle named by the shipped index.html must be present.
+          entry=$(curl -s http://127.0.0.1:8188/ \
+            | grep -o '/_app/immutable/entry/[^"]*\.js' | head -1)
+          test -n "$entry" || fail "index.html references no entry bundle"
+          [ "$(code "http://127.0.0.1:8188$entry")" = 200 ] \
+            || fail "entry bundle $entry is missing from the image"
+
+          # The container's own healthcheck has to reach the app from inside.
+          for _ in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' smoke)
+            [ "$status" = healthy ] && break
+            [ "$status" = unhealthy ] && fail "healthcheck reports unhealthy"
+            sleep 2
+          done
+          [ "$status" = healthy ] || fail "healthcheck never became healthy (last: $status)"
+
+          docker rm -f smoke >/dev/null
+          echo "image serves the app, falls back only where it should, and is healthy"
+
+      # Only now, with the image driven, push it for real — multi-arch, from the
+      # cache the smoke build populated. `latest` moves with each release.
+      - name: push to ghcr
+        if: github.event_name == 'release'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.version.outputs.value }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

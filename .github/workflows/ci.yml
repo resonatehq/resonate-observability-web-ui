@@ -32,3 +32,67 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # The image is a release artifact, but gating it only at release time means a
+  # change to the Dockerfile or the nginx config is first exercised by a tag —
+  # too late to fix cheaply. This builds and drives it on every PR. It asserts
+  # the two behaviours the routing config exists to produce, in both directions:
+  # a cold deep link must boot the SPA, and a missing hashed asset must 404
+  # rather than be answered with index.html (which reaches the browser as an
+  # unexplained module parse error rather than as the missing file it is).
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: resonate-ui:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        run: |
+          docker run -d --name smoke -p 8188:80 resonate-ui:ci
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:8188/ && break
+            sleep 1
+          done
+
+          fail() { echo "FAIL: $1"; docker logs smoke; exit 1; }
+          code() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
+
+          [ "$(code http://127.0.0.1:8188/)" = 200 ] || fail "/ did not serve 200"
+
+          [ "$(code http://127.0.0.1:8188/promises/checkout-7f3a)" = 200 ] \
+            || fail "a cold deep link did not serve the app"
+          curl -s http://127.0.0.1:8188/promises/checkout-7f3a | grep -q '<!doctype html>' \
+            || fail "the deep link response was not the app shell"
+
+          [ "$(code http://127.0.0.1:8188/_app/immutable/nope.js)" = 404 ] \
+            || fail "a missing hashed asset was answered with the fallback"
+
+          entry=$(curl -s http://127.0.0.1:8188/ \
+            | grep -o '/_app/immutable/entry/[^"]*\.js' | head -1)
+          test -n "$entry" || fail "index.html references no entry bundle"
+          [ "$(code "http://127.0.0.1:8188$entry")" = 200 ] \
+            || fail "entry bundle $entry is missing from the image"
+
+          # The healthcheck resolves a hostname inside the container, which is
+          # exactly the class of thing that differs between a laptop and a
+          # runner, so it is asserted rather than assumed.
+          for _ in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' smoke)
+            [ "$status" = healthy ] && break
+            [ "$status" = unhealthy ] && fail "healthcheck reports unhealthy"
+            sleep 2
+          done
+          [ "$status" = healthy ] || fail "healthcheck never became healthy (last: $status)"
+
+          echo "image serves the app, falls back only where it should, and is healthy"
