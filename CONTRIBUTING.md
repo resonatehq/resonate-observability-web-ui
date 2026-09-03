@@ -1,10 +1,10 @@
-# Contributing to Resonate Observability Web UI
+# Contributing to Resonate UI
 
 Thanks for your interest in contributing! This project is in its early stages and we welcome bug reports, feature ideas, and code contributions.
 
 ## Reporting Issues
 
-Found a bug or have a feature request? [Open an issue](https://github.com/resonatehq/resonate-observability-web-ui/issues/new).
+Found a bug or have a feature request? [Open an issue](https://github.com/resonatehq/resonate-ui/issues/new).
 
 When reporting a bug, please include:
 
@@ -24,8 +24,8 @@ When requesting a feature:
 
 ```bash
 # Clone the repo
-git clone https://github.com/resonatehq/resonate-observability-web-ui.git
-cd resonate-observability-web-ui
+git clone https://github.com/resonatehq/resonate-ui.git
+cd resonate-ui
 
 # Install dependencies
 npm install
@@ -34,13 +34,15 @@ npm install
 npm run dev
 ```
 
-You'll need a running [Resonate server](https://github.com/resonatehq/resonate) to connect to. Configure the server URL at `/settings` in the UI.
+You don't need a server to develop: `npm run mock` starts a fixture speaking the real protocol on `:8099`, and every screenshot in the README comes from it. To work against a real [Resonate server](https://github.com/resonatehq/resonate), configure its URL at `/settings` in the UI.
 
 ### Useful Commands
 
 | Command | Description |
 |---------|-------------|
 | `npm run dev` | Start dev server at localhost:5173 |
+| `npm run mock` | Protocol fixture on localhost:8099 — develop without a server |
+| `npm test` | Protocol conformance tests |
 | `npm run build` | Production build |
 | `npm run preview` | Preview production build |
 | `npm run check` | Run svelte-check (type checking) |
@@ -49,8 +51,8 @@ You'll need a running [Resonate server](https://github.com/resonatehq/resonate) 
 
 1. **Fork the repo** and create a branch from `main`
 2. **Make your changes** — keep commits focused and well-described
-3. **Run `npm run check`** to verify there are no type errors
-4. **Test manually** — verify your changes work against a running Resonate server
+3. **Run `npm run check` and `npm test`** — CI enforces both, plus a build and a container smoke test, on every PR
+4. **Test manually** — the fixture (`npm run mock`) covers most changes; use a running Resonate server when you touch the protocol
 5. **Open a pull request** with a clear description of what you changed and why
 
 ### Code Style
@@ -63,7 +65,6 @@ You'll need a running [Resonate server](https://github.com/resonatehq/resonate) 
 ## Community
 
 - **Discord** — Join the [Resonate Discord](https://discord.gg/AHGHZPrDH3) to chat with the team
-- **Discussions** — Use [GitHub Discussions](https://github.com/resonatehq/resonate-observability-web-ui/discussions) for questions and ideas
 
 ## License
 
